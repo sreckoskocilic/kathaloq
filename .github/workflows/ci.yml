@@ -19,6 +19,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
