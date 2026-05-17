@@ -1,5 +1,8 @@
 # Kathaloq
 
+[![CI](https://github.com/sreckoskocilic/kathaloq/actions/workflows/ci.yml/badge.svg)](https://github.com/sreckoskocilic/kathaloq/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Local catalog browser for attached directories (removable drives, NAS mounts, etc). Indexes file trees into SQLite so you can search and browse them after the disk is disconnected.
 
 Tauri 2 + Svelte 5 + Rust.
@@ -34,7 +37,7 @@ sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
 ## Build from source
 
 ```bash
-git clone https://github.com/user/kathaloq.git
+git clone https://github.com/sreckoskocilic/kathaloq.git
 cd kathaloq
 npm install
 npm run tauri build
