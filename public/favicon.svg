@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 160 160">
+  <rect width="160" height="160" rx="60" fill="#0c100c"/>
+  <g transform="translate(16,38)">
+    <text x="0" y="0" font-family="'Courier New','Lucida Console',monospace" font-size="13" fill="#4a6844" opacity="0.6">~/catalog $</text>
+    <text x="0" y="42" font-family="'Courier New','Lucida Console',monospace" font-size="48" font-weight="700" fill="#50b850" letter-spacing="4">ktlq</text>
+    <rect x="122" y="16" width="4" height="34" rx="1" fill="#50b850" opacity="0.8"/>
+    <line x1="0" y1="50" x2="120" y2="50" stroke="#50b850" stroke-width="1" opacity="0.25"/>
+    <text x="0" y="70" font-family="'Courier New','Lucida Console',monospace" font-size="11" fill="#7ea878" opacity="0.45">4 catalogs indexed.</text>
+  </g>
+</svg>
