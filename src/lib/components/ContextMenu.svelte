@@ -16,7 +16,15 @@
 
 <svelte:window on:click={handleWindowClick} on:contextmenu={handleWindowClick} />
 
-<div class="context-menu" style:left="{x}px" style:top="{y}px" on:click|stopPropagation on:keydown|stopPropagation role="menu" tabindex="-1">
+<div
+  class="context-menu"
+  style:left="{x}px"
+  style:top="{y}px"
+  on:click|stopPropagation
+  on:keydown|stopPropagation
+  role="menu"
+  tabindex="-1"
+>
   {#each items as item (item.label)}
     <button
       class="menu-item"

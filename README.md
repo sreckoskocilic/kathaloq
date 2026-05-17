@@ -44,6 +44,7 @@ npm run tauri build
 ```
 
 Output:
+
 - macOS: `src-tauri/target/release/bundle/macos/Kathaloq.app` and `.dmg`
 - Linux: `src-tauri/target/release/bundle/deb/` and `appimage/`
 - Windows: `src-tauri/target/release/bundle/msi/` and `nsis/`

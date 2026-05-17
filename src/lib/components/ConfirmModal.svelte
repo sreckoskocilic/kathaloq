@@ -12,11 +12,28 @@
 <svelte:window on:keydown={handleKeydown} />
 
 <div class="overlay" on:click={onCancel} role="presentation">
-  <div class="modal" on:click|stopPropagation on:keydown={handleKeydown} role="alertdialog" aria-modal="true" tabindex="-1">
+  <div
+    class="modal"
+    on:click|stopPropagation
+    on:keydown={handleKeydown}
+    role="alertdialog"
+    aria-modal="true"
+    tabindex="-1"
+  >
     <div class="icon-wrap">
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-        <path d="M10 2L18 17H2L10 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        <path d="M10 8v4M10 14v0.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path
+          d="M10 2L18 17H2L10 2z"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linejoin="round"
+        />
+        <path
+          d="M10 8v4M10 14v0.5"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+        />
       </svg>
     </div>
     <p class="message">{message}</p>

@@ -3,8 +3,8 @@
   import { theme } from "../stores/theme";
   import { formatSize } from "../services/format";
 
-  $: fileCount = $currentFiles.filter(f => !f.is_dir).length;
-  $: folderCount = $currentFiles.filter(f => f.is_dir).length;
+  $: fileCount = $currentFiles.filter((f) => !f.is_dir).length;
+  $: folderCount = $currentFiles.filter((f) => f.is_dir).length;
 </script>
 
 <footer class="status-bar">

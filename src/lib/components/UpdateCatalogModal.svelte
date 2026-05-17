@@ -44,14 +44,25 @@
   }
 
   $: hasChanges = preview
-    ? preview.added > 0 || preview.updated > 0 || preview.deleted_files > 0 || preview.deleted_folders > 0 || preview.tags_to_backfill > 0
+    ? preview.added > 0 ||
+      preview.updated > 0 ||
+      preview.deleted_files > 0 ||
+      preview.deleted_folders > 0 ||
+      preview.tags_to_backfill > 0
     : false;
 </script>
 
 <svelte:window on:keydown={handleKeydown} />
 
 <div class="overlay" on:click={onClose} role="presentation">
-  <div class="modal" on:click|stopPropagation on:keydown={handleKeydown} role="dialog" aria-modal="true" tabindex="-1">
+  <div
+    class="modal"
+    on:click|stopPropagation
+    on:keydown={handleKeydown}
+    role="dialog"
+    aria-modal="true"
+    tabindex="-1"
+  >
     <h3 class="title">Update Catalog</h3>
 
     <div class="catalog-info">
@@ -69,13 +80,11 @@
         <button class="btn btn-secondary" on:click={onClose}>Close</button>
         <button class="btn btn-primary" on:click={scanForChanges}>Scan for Changes</button>
       </div>
-
     {:else if step === "scanning"}
       <div class="status">
         <div class="spinner"></div>
         <span>Scanning for changes...</span>
       </div>
-
     {:else if step === "preview" && preview}
       <div class="preview-stats">
         <div class="stat-row">
@@ -88,11 +97,15 @@
         </div>
         <div class="stat-row">
           <span class="stat-label">Deleted files:</span>
-          <span class="stat-value" class:has-change={preview.deleted_files > 0}>{preview.deleted_files}</span>
+          <span class="stat-value" class:has-change={preview.deleted_files > 0}
+            >{preview.deleted_files}</span
+          >
         </div>
         <div class="stat-row">
           <span class="stat-label">Deleted folders:</span>
-          <span class="stat-value" class:has-change={preview.deleted_folders > 0}>{preview.deleted_folders}</span>
+          <span class="stat-value" class:has-change={preview.deleted_folders > 0}
+            >{preview.deleted_folders}</span
+          >
         </div>
         <div class="stat-row">
           <span class="stat-label">Unchanged:</span>
@@ -118,13 +131,11 @@
           <button class="btn btn-primary" on:click={onClose}>Close</button>
         </div>
       {/if}
-
     {:else if step === "applying"}
       <div class="status">
         <div class="spinner"></div>
         <span>Applying changes...</span>
       </div>
-
     {:else if step === "done" && result}
       <div class="preview-stats">
         <div class="stat-row">
@@ -137,7 +148,11 @@
         </div>
         <div class="stat-row">
           <span class="stat-label">Deleted:</span>
-          <span class="stat-value" class:has-change={result.deleted_files + result.deleted_folders > 0}>{result.deleted_files + result.deleted_folders}</span>
+          <span
+            class="stat-value"
+            class:has-change={result.deleted_files + result.deleted_folders > 0}
+            >{result.deleted_files + result.deleted_folders}</span
+          >
         </div>
         <div class="stat-row">
           <span class="stat-label">Unchanged:</span>
@@ -148,7 +163,6 @@
       <div class="actions">
         <button class="btn btn-primary" on:click={handleDone}>Done</button>
       </div>
-
     {:else if step === "error"}
       <p class="error">{errorMsg}</p>
       <div class="actions">
@@ -253,7 +267,9 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .preview-stats {

@@ -1,6 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { formatSize, formatDate, formatDuration, formatBitrate, formatSampleRate, getFileColor } from "../services/format";
+  import {
+    formatSize,
+    formatDate,
+    formatDuration,
+    formatBitrate,
+    formatSampleRate,
+    getFileColor,
+  } from "../services/format";
   import * as api from "../services/tauri";
   import type { FileEntry, FolderStats, MediaTags } from "../types";
 
@@ -23,20 +30,43 @@
 
     if (isSingle && entry.is_dir) {
       promises.push(
-        api.getFolderStats(catalogId, entry.id).then((s) => { folderStats = s; }).catch(() => {})
+        api
+          .getFolderStats(catalogId, entry.id)
+          .then((s) => {
+            folderStats = s;
+          })
+          .catch(() => {})
       );
     } else if (isSingle && !entry.is_dir) {
       promises.push(
-        api.getMediaTags(entry.id).then((t) => { mediaTags = t; }).catch(() => {})
+        api
+          .getMediaTags(entry.id)
+          .then((t) => {
+            mediaTags = t;
+          })
+          .catch(() => {})
       );
     } else if (isMulti) {
       promises.push(
-        api.getBulkStats(catalogId, entries.map((e) => e.id)).then((s) => { bulkStats = s; }).catch(() => {})
+        api
+          .getBulkStats(
+            catalogId,
+            entries.map((e) => e.id)
+          )
+          .then((s) => {
+            bulkStats = s;
+          })
+          .catch(() => {})
       );
       const fileIds = entries.filter((e) => !e.is_dir).map((e) => e.id);
       if (fileIds.length > 0) {
         promises.push(
-          api.getMediaTagsBulk(fileIds).then((t) => { bulkMediaTags = t; }).catch(() => {})
+          api
+            .getMediaTagsBulk(fileIds)
+            .then((t) => {
+              bulkMediaTags = t;
+            })
+            .catch(() => {})
         );
       }
     }
@@ -64,10 +94,14 @@
   $: multiFolderCount = entries.filter((e) => e.is_dir).length;
   $: multiDirectSize = entries.filter((e) => !e.is_dir).reduce((sum, e) => sum + e.size, 0);
 
-  $: commonArtist = bulkMediaTags.length > 0 ? getCommonValue(bulkMediaTags.map((t) => t.artist)) : null;
-  $: commonAlbum = bulkMediaTags.length > 0 ? getCommonValue(bulkMediaTags.map((t) => t.album)) : null;
-  $: commonGenre = bulkMediaTags.length > 0 ? getCommonValue(bulkMediaTags.map((t) => t.genre)) : null;
-  $: commonYear = bulkMediaTags.length > 0 ? getCommonValue(bulkMediaTags.map((t) => t.year)) : null;
+  $: commonArtist =
+    bulkMediaTags.length > 0 ? getCommonValue(bulkMediaTags.map((t) => t.artist)) : null;
+  $: commonAlbum =
+    bulkMediaTags.length > 0 ? getCommonValue(bulkMediaTags.map((t) => t.album)) : null;
+  $: commonGenre =
+    bulkMediaTags.length > 0 ? getCommonValue(bulkMediaTags.map((t) => t.genre)) : null;
+  $: commonYear =
+    bulkMediaTags.length > 0 ? getCommonValue(bulkMediaTags.map((t) => t.year)) : null;
   $: totalDuration = bulkMediaTags.reduce((sum, t) => sum + (t.duration_secs ?? 0), 0);
   $: hasMultiMediaTags = bulkMediaTags.length > 0;
 </script>
@@ -88,10 +122,19 @@
         <span class="info-icon" style:color={getFileColor(entry.extension, entry.is_dir)}>
           {#if entry.is_dir}
             <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M1.5 3.5C1.5 2.67 2.17 2 3 2H6.17L7.67 3.5H13C13.83 3.5 14.5 4.17 14.5 5V12C14.5 12.83 13.83 13.5 13 13.5H3C2.17 13.5 1.5 12.83 1.5 12V3.5Z" />
+              <path
+                d="M1.5 3.5C1.5 2.67 2.17 2 3 2H6.17L7.67 3.5H13C13.83 3.5 14.5 4.17 14.5 5V12C14.5 12.83 13.83 13.5 13 13.5H3C2.17 13.5 1.5 12.83 1.5 12V3.5Z"
+              />
             </svg>
           {:else}
-            <svg width="26" height="26" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+            <svg
+              width="26"
+              height="26"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.2"
+            >
               <path d="M4 1.5h5l4 4V14a.5.5 0 01-.5.5h-8A.5.5 0 014 14V2a.5.5 0 01.5-.5z" />
               <path d="M9 1.5V5.5h4" />
             </svg>
@@ -105,7 +148,9 @@
       <div class="info-rows">
         <div class="info-row">
           <span class="info-label">Kind</span>
-          <span class="info-value">{entry.is_dir ? "Folder" : entry.extension?.toUpperCase() ?? "File"}</span>
+          <span class="info-value"
+            >{entry.is_dir ? "Folder" : (entry.extension?.toUpperCase() ?? "File")}</span
+          >
         </div>
         <div class="info-row">
           <span class="info-label">Path</span>
@@ -208,16 +253,28 @@
           {#if mediaTags.channels}
             <div class="info-row">
               <span class="info-label">Channels</span>
-              <span class="info-value">{mediaTags.channels === 1 ? "Mono" : mediaTags.channels === 2 ? "Stereo" : mediaTags.channels}</span>
+              <span class="info-value"
+                >{mediaTags.channels === 1
+                  ? "Mono"
+                  : mediaTags.channels === 2
+                    ? "Stereo"
+                    : mediaTags.channels}</span
+              >
             </div>
           {/if}
         {/if}
       </div>
-
     {:else if isMulti}
       <div class="info-header">
         <span class="info-icon multi">
-          <svg width="26" height="26" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+          <svg
+            width="26"
+            height="26"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.2"
+          >
             <rect x="2" y="3" width="9" height="11" rx="1" />
             <rect x="5" y="2" width="9" height="11" rx="1" />
           </svg>

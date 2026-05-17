@@ -4,12 +4,15 @@
   import { getChildren } from "../services/tauri";
   import { SvelteSet, SvelteMap } from "svelte/reactivity";
   import TreeNode from "./TreeNode.svelte";
-  import type { Catalog, FileEntry } from "../types";
+  import type { BreadcrumbItem, Catalog, FileEntry } from "../types";
 
   export let onAddCatalog: () => void;
-  import type { BreadcrumbItem } from "../types";
 
-  export let onSelectFolder: (catalogId: number, folder: { id: number; name: string } | null, path?: BreadcrumbItem[]) => void;
+  export let onSelectFolder: (
+    catalogId: number,
+    folder: { id: number; name: string } | null,
+    path?: BreadcrumbItem[]
+  ) => void;
   export let onRequestDelete: (catalog: Catalog) => void;
   export let onRequestUpdate: (catalog: Catalog) => void;
   export let onOpenSettings: () => void;
@@ -19,12 +22,19 @@
   let selectedFolderId: number | null = $sidebarState.selectedFolderId;
 
   // Restore active catalog from persisted state
-  $: if ($catalogs.length > 0 && $activeCatalogId === null && $sidebarState.activeCatalogId !== null) {
+  $: if (
+    $catalogs.length > 0 &&
+    $activeCatalogId === null &&
+    $sidebarState.activeCatalogId !== null
+  ) {
     const exists = $catalogs.find((c) => c.id === $sidebarState.activeCatalogId);
     if (exists) {
       activeCatalogId.set($sidebarState.activeCatalogId);
       if ($sidebarState.selectedFolderId) {
-        onSelectFolder($sidebarState.activeCatalogId, { id: $sidebarState.selectedFolderId, name: "" });
+        onSelectFolder($sidebarState.activeCatalogId, {
+          id: $sidebarState.selectedFolderId,
+          name: "",
+        });
       } else {
         onSelectFolder($sidebarState.activeCatalogId, null);
       }
@@ -42,7 +52,9 @@
         const catalog = $catalogs.find((c) => c.id === catalogId);
         if (catalog) {
           try {
-            const children = sortByName((await getChildren(catalogId, null)).filter((f) => f.is_dir));
+            const children = sortByName(
+              (await getChildren(catalogId, null)).filter((f) => f.is_dir)
+            );
             rootFolders.set(catalogId, children);
             rootFolders = rootFolders;
           } catch (_) {}
@@ -111,7 +123,7 @@
     <span class="section-title">Catalogs</span>
     <button class="header-btn" on:click={onAddCatalog} title="Add catalog">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
       </svg>
     </button>
   </div>
@@ -129,14 +141,27 @@
           tabindex="0"
           aria-expanded={expandedCatalogs.has(catalog.id)}
         >
-          <button class="expand-btn" on:click={(e) => toggleCatalog(e, catalog)} tabindex="-1" aria-label="Expand">
-            <svg width="10" height="10" viewBox="0 0 10 10" class:rotated={expandedCatalogs.has(catalog.id)}>
-              <path d="M3 2l4 3-4 3z" fill="currentColor"/>
+          <button
+            class="expand-btn"
+            on:click={(e) => toggleCatalog(e, catalog)}
+            tabindex="-1"
+            aria-label="Expand"
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 10 10"
+              class:rotated={expandedCatalogs.has(catalog.id)}
+            >
+              <path d="M3 2l4 3-4 3z" fill="currentColor" />
             </svg>
           </button>
 
           <svg class="catalog-icon" width="16" height="16" viewBox="0 0 16 16">
-            <path d="M1.5 3C1.5 2.17 2.17 1.5 3 1.5H6l1.5 1.5H13c.83 0 1.5.67 1.5 1.5V12c0 .83-.67 1.5-1.5 1.5H3c-.83 0-1.5-.67-1.5-1.5V3z" fill="var(--icon-folder)"/>
+            <path
+              d="M1.5 3C1.5 2.17 2.17 1.5 3 1.5H6l1.5 1.5H13c.83 0 1.5.67 1.5 1.5V12c0 .83-.67 1.5-1.5 1.5H3c-.83 0-1.5-.67-1.5-1.5V3z"
+              fill="var(--icon-folder)"
+            />
           </svg>
 
           <div class="catalog-info">
@@ -146,14 +171,41 @@
           <div class="item-actions">
             <button class="action-btn" on:click={(e) => handleUpdateClick(e, catalog)} title="Sync">
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M1.5 6a4.5 4.5 0 018.18-2.6M10.5 6a4.5 4.5 0 01-8.18 2.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                <path d="M10 1v2.5H7.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M2 11V8.5h2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                <path
+                  d="M1.5 6a4.5 4.5 0 018.18-2.6M10.5 6a4.5 4.5 0 01-8.18 2.6"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M10 1v2.5H7.5"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M2 11V8.5h2.5"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </button>
-            <button class="action-btn danger" on:click={(e) => handleDeleteClick(e, catalog)} title="Remove">
+            <button
+              class="action-btn danger"
+              on:click={(e) => handleDeleteClick(e, catalog)}
+              title="Remove"
+            >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M2.5 3h7M4.5 3V2h3v1M3.5 3v7h5V3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+                <path
+                  d="M2.5 3h7M4.5 3V2h3v1M3.5 3v7h5V3"
+                  stroke="currentColor"
+                  stroke-width="1.1"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </button>
           </div>
@@ -180,7 +232,11 @@
     {#if $catalogs.length === 0}
       <div class="empty-state">
         <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.25">
-          <path d="M6 10c0-1.5 1.2-2.7 2.7-2.7H15l2.7 2.7h10.6c1.5 0 2.7 1.2 2.7 2.7v14c0 1.5-1.2 2.7-2.7 2.7H8.7C7.2 29.4 6 28.2 6 26.7V10z" stroke="currentColor" stroke-width="1.3"/>
+          <path
+            d="M6 10c0-1.5 1.2-2.7 2.7-2.7H15l2.7 2.7h10.6c1.5 0 2.7 1.2 2.7 2.7v14c0 1.5-1.2 2.7-2.7 2.7H8.7C7.2 29.4 6 28.2 6 26.7V10z"
+            stroke="currentColor"
+            stroke-width="1.3"
+          />
         </svg>
         <p>No catalogs yet</p>
         <p class="empty-hint">Click + to index a folder</p>
@@ -190,9 +246,18 @@
 
   <div class="sidebar-footer">
     <button class="footer-btn" on:click={onOpenSettings} title="Settings">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-        <path d="M6.5 1.5h3l.4 2 1.5.8 1.8-1 1.5 2.6-1.4 1.2v1.8l1.4 1.2-1.5 2.6-1.8-1-1.5.8-.4 2h-3l-.4-2-1.5-.8-1.8 1-1.5-2.6 1.4-1.2V6.1L1.3 4.9l1.5-2.6 1.8 1 1.5-.8.4-2z"/>
-        <circle cx="8" cy="8" r="2"/>
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.3"
+      >
+        <path
+          d="M6.5 1.5h3l.4 2 1.5.8 1.8-1 1.5 2.6-1.4 1.2v1.8l1.4 1.2-1.5 2.6-1.8-1-1.5.8-.4 2h-3l-.4-2-1.5-.8-1.8 1-1.5-2.6 1.4-1.2V6.1L1.3 4.9l1.5-2.6 1.8 1 1.5-.8.4-2z"
+        />
+        <circle cx="8" cy="8" r="2" />
       </svg>
       <span>Settings</span>
     </button>
@@ -321,7 +386,9 @@
     gap: 2px;
     visibility: hidden;
     opacity: 0;
-    transition: opacity 0.1s, visibility 0.1s;
+    transition:
+      opacity 0.1s,
+      visibility 0.1s;
   }
 
   .catalog-item:hover .item-actions {

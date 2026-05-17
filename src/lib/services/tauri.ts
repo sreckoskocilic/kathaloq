@@ -20,10 +20,7 @@ export async function getChildren(
   return invoke<FileEntry[]>("get_children", { catalogId, parentId });
 }
 
-export async function searchFiles(
-  catalogId: number,
-  query: string
-): Promise<FileEntry[]> {
+export async function searchFiles(catalogId: number, query: string): Promise<FileEntry[]> {
   return invoke<FileEntry[]>("search_files", { catalogId, query });
 }
 

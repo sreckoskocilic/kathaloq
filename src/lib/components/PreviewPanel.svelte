@@ -1,6 +1,13 @@
 <script lang="ts">
   import { afterUpdate } from "svelte";
-  import { formatSize, formatDate, formatDuration, formatBitrate, formatSampleRate, getFileColor } from "../services/format";
+  import {
+    formatSize,
+    formatDate,
+    formatDuration,
+    formatBitrate,
+    formatSampleRate,
+    getFileColor,
+  } from "../services/format";
   import * as api from "../services/tauri";
   import type { FileEntry, FolderStats, MediaTags } from "../types";
 
@@ -18,9 +25,8 @@
   $: isMulti = entries.length > 1;
 
   afterUpdate(() => {
-    const loadKey = entries.length > 0 && catalogId
-      ? `${catalogId}:${entries.map(e => e.id).join(",")}`
-      : "";
+    const loadKey =
+      entries.length > 0 && catalogId ? `${catalogId}:${entries.map((e) => e.id).join(",")}` : "";
 
     if (loadKey === lastLoadKey) return;
     lastLoadKey = loadKey;
@@ -55,7 +61,9 @@
         if (gen !== loadGeneration) return;
         folderStats = result;
       }
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
 
     if (gen !== loadGeneration) return;
     loading = false;
@@ -70,28 +78,42 @@
   {#if entries.length === 0}
     <div class="no-selection">
       <svg width="32" height="32" viewBox="0 0 32 32" fill="none" opacity="0.3">
-        <path d="M6 8c0-1.1.9-2 2-2h5l2 2h9c1.1 0 2 .9 2 2v14c0 1.1-.9 2-2 2H8c-1.1 0-2-.9-2-2V8z" stroke="currentColor" stroke-width="1.3"/>
+        <path
+          d="M6 8c0-1.1.9-2 2-2h5l2 2h9c1.1 0 2 .9 2 2v14c0 1.1-.9 2-2 2H8c-1.1 0-2-.9-2-2V8z"
+          stroke="currentColor"
+          stroke-width="1.3"
+        />
       </svg>
       <span>Select a file to preview</span>
     </div>
-
   {:else if isSingle}
     <div class="preview-content">
       <div class="preview-icon" style:color={getFileColor(entry.extension, entry.is_dir)}>
         {#if entry.is_dir}
           <svg width="48" height="48" viewBox="0 0 48 48" fill="currentColor">
-            <path d="M4 10c0-2.2 1.8-4 4-4h10l4 4h18c2.2 0 4 1.8 4 4v24c0 2.2-1.8 4-4 4H8c-2.2 0-4-1.8-4-4V10z"/>
+            <path
+              d="M4 10c0-2.2 1.8-4 4-4h10l4 4h18c2.2 0 4 1.8 4 4v24c0 2.2-1.8 4-4 4H8c-2.2 0-4-1.8-4-4V10z"
+            />
           </svg>
         {:else}
-          <svg width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M12 4h14l12 12v24a2 2 0 01-2 2H12a2 2 0 01-2-2V6a2 2 0 012-2z"/>
-            <path d="M26 4v12h12"/>
+          <svg
+            width="44"
+            height="44"
+            viewBox="0 0 44 44"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <path d="M12 4h14l12 12v24a2 2 0 01-2 2H12a2 2 0 01-2-2V6a2 2 0 012-2z" />
+            <path d="M26 4v12h12" />
           </svg>
         {/if}
       </div>
 
       <h3 class="preview-name">{entry.name}</h3>
-      <span class="preview-type">{entry.is_dir ? "Folder" : (entry.extension?.toUpperCase() ?? "File")}</span>
+      <span class="preview-type"
+        >{entry.is_dir ? "Folder" : (entry.extension?.toUpperCase() ?? "File")}</span
+      >
 
       <div class="info-section">
         <div class="info-row">
@@ -198,19 +220,32 @@
           {#if mediaTags.channels}
             <div class="info-row">
               <span class="info-label">Channels</span>
-              <span class="info-value">{mediaTags.channels === 1 ? "Mono" : mediaTags.channels === 2 ? "Stereo" : String(mediaTags.channels)}</span>
+              <span class="info-value"
+                >{mediaTags.channels === 1
+                  ? "Mono"
+                  : mediaTags.channels === 2
+                    ? "Stereo"
+                    : String(mediaTags.channels)}</span
+              >
             </div>
           {/if}
         </div>
       {/if}
     </div>
-
   {:else if isMulti}
     <div class="preview-content">
       <div class="preview-icon multi">
-        <svg width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.5">
-          <rect x="6" y="10" width="24" height="28" rx="2"/>
-          <rect x="14" y="6" width="24" height="28" rx="2"/>
+        <svg
+          width="44"
+          height="44"
+          viewBox="0 0 44 44"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          opacity="0.5"
+        >
+          <rect x="6" y="10" width="24" height="28" rx="2" />
+          <rect x="14" y="6" width="24" height="28" rx="2" />
         </svg>
       </div>
 

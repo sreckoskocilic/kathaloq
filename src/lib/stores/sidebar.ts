@@ -17,12 +17,17 @@ function getInitial(): SidebarState {
     if (raw) {
       const parsed = JSON.parse(raw);
       return {
-        expandedCatalogIds: Array.isArray(parsed.expandedCatalogIds) ? parsed.expandedCatalogIds : [],
+        expandedCatalogIds: Array.isArray(parsed.expandedCatalogIds)
+          ? parsed.expandedCatalogIds
+          : [],
         activeCatalogId: typeof parsed.activeCatalogId === "number" ? parsed.activeCatalogId : null,
-        selectedFolderId: typeof parsed.selectedFolderId === "number" ? parsed.selectedFolderId : null,
+        selectedFolderId:
+          typeof parsed.selectedFolderId === "number" ? parsed.selectedFolderId : null,
       };
     }
-  } catch { /* */ }
+  } catch {
+    /* */
+  }
   return { expandedCatalogIds: [], activeCatalogId: null, selectedFolderId: null };
 }
 
@@ -34,5 +39,7 @@ sidebarState.subscribe((value) => {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
-  } catch { /* */ }
+  } catch {
+    /* */
+  }
 });

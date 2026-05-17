@@ -139,7 +139,7 @@
   function getCellValue(entry: FileEntry, colId: string): string {
     switch (colId) {
       case "extension":
-        return entry.is_dir ? "Folder" : entry.extension?.toUpperCase() ?? "File";
+        return entry.is_dir ? "Folder" : (entry.extension?.toUpperCase() ?? "File");
       case "size":
         return entry.is_dir ? "" : formatSize(entry.size);
       case "modified":
@@ -159,8 +159,17 @@
   {:else if sortedFiles.length === 0}
     <div class="empty-state">
       <svg width="48" height="48" viewBox="0 0 48 48" fill="none" opacity="0.3">
-        <path d="M8 12C8 10.9 8.9 10 10 10H20l3 3H38c1.1 0 2 .9 2 2v20c0 1.1-.9 2-2 2H10c-1.1 0-2-.9-2-2V12z" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M20 25h8M24 21v8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path
+          d="M8 12C8 10.9 8.9 10 10 10H20l3 3H38c1.1 0 2 .9 2 2v20c0 1.1-.9 2-2 2H10c-1.1 0-2-.9-2-2V12z"
+          stroke="currentColor"
+          stroke-width="1.5"
+        />
+        <path
+          d="M20 25h8M24 21v8"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+        />
       </svg>
       <span>This folder is empty</span>
     </div>
@@ -187,19 +196,28 @@
           <div
             class="row row-up"
             on:dblclick={onGoUp}
-            on:keydown={(e) => { if (e.key === "Enter") onGoUp(); }}
+            on:keydown={(e) => {
+              if (e.key === "Enter") onGoUp();
+            }}
             role="row"
             tabindex="0"
           >
             <div class="cell col-name" style:flex="1">
               <span class="file-icon">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-muted)" stroke-width="1.4">
-                  <path d="M8 12V4M4 7l4-4 4 4" stroke-linecap="round" stroke-linejoin="round"/>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="var(--text-muted)"
+                  stroke-width="1.4"
+                >
+                  <path d="M8 12V4M4 7l4-4 4 4" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
               </span>
               <span class="file-name">..</span>
             </div>
-            {#each visibleCols.filter(c => c.id !== "name") as col (col.id)}
+            {#each visibleCols.filter((c) => c.id !== "name") as col (col.id)}
               <div class="cell col-{col.id}" style:width={col.width}></div>
             {/each}
           </div>
@@ -223,22 +241,30 @@
                   <span class="file-icon" style:color={getFileColor(entry.extension, entry.is_dir)}>
                     {#if entry.is_dir}
                       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M1.5 3.5C1.5 2.67 2.17 2 3 2H6.17L7.67 3.5H13C13.83 3.5 14.5 4.17 14.5 5V12C14.5 12.83 13.83 13.5 13 13.5H3C2.17 13.5 1.5 12.83 1.5 12V3.5Z"/>
+                        <path
+                          d="M1.5 3.5C1.5 2.67 2.17 2 3 2H6.17L7.67 3.5H13C13.83 3.5 14.5 4.17 14.5 5V12C14.5 12.83 13.83 13.5 13 13.5H3C2.17 13.5 1.5 12.83 1.5 12V3.5Z"
+                        />
                       </svg>
                     {:else}
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1">
-                        <path d="M4.5 1.5h4.5l4 4V14a.5.5 0 01-.5.5H4.5A.5.5 0 014 14V2a.5.5 0 01.5-.5z"/>
-                        <path d="M9 1.5V5.5h4"/>
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.1"
+                      >
+                        <path
+                          d="M4.5 1.5h4.5l4 4V14a.5.5 0 01-.5.5H4.5A.5.5 0 014 14V2a.5.5 0 01.5-.5z"
+                        />
+                        <path d="M9 1.5V5.5h4" />
                       </svg>
                     {/if}
                   </span>
                   <span class="file-name" class:is-dir={entry.is_dir}>{entry.name}</span>
                 </div>
               {:else}
-                <div
-                  class="cell col-{col.id}"
-                  style:width={col.width}
-                >
+                <div class="cell col-{col.id}" style:width={col.width}>
                   {getCellValue(entry, col.id)}
                 </div>
               {/if}
@@ -251,24 +277,50 @@
 </div>
 
 <svelte:window
-  on:click={() => { if (contextMenu) closeContextMenu(); }}
-  on:contextmenu={() => { if (contextMenu) closeContextMenu(); }}
+  on:click={() => {
+    if (contextMenu) closeContextMenu();
+  }}
+  on:contextmenu={() => {
+    if (contextMenu) closeContextMenu();
+  }}
 />
 
 {#if contextMenu}
-  <div class="context-menu" style:left="{contextMenu.x}px" style:top="{contextMenu.y}px" on:click|stopPropagation on:keydown|stopPropagation role="menu" tabindex="-1">
+  <div
+    class="context-menu"
+    style:left="{contextMenu.x}px"
+    style:top="{contextMenu.y}px"
+    on:click|stopPropagation
+    on:keydown|stopPropagation
+    role="menu"
+    tabindex="-1"
+  >
     <button class="menu-item" on:click={handleGetInfo} role="menuitem">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-        <circle cx="8" cy="8" r="6"/>
-        <path d="M8 7v4"/>
-        <circle cx="8" cy="5" r="0.5" fill="currentColor"/>
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.3"
+      >
+        <circle cx="8" cy="8" r="6" />
+        <path d="M8 7v4" />
+        <circle cx="8" cy="5" r="0.5" fill="currentColor" />
       </svg>
       Properties
     </button>
     <div class="menu-sep"></div>
     <button class="menu-item danger" on:click={handleRemoveSelected} role="menuitem">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-        <path d="M3 4h10M5.5 4V3h5v1M4.5 4v9.5h7V4"/>
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.3"
+      >
+        <path d="M3 4h10M5.5 4V3h5v1M4.5 4v9.5h7V4" />
       </svg>
       Remove
     </button>
@@ -284,7 +336,8 @@
     background: var(--bg-base);
   }
 
-  .loading-state, .empty-state {
+  .loading-state,
+  .empty-state {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -305,7 +358,9 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .file-list {

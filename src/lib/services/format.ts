@@ -39,8 +39,39 @@ export function getFileColor(extension: string | null, isDir: boolean): string {
   const ext = extension.toLowerCase();
 
   const imageExts = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff"];
-  const codeExts = ["ts", "js", "tsx", "jsx", "rs", "py", "go", "c", "cpp", "h", "java", "rb", "php", "css", "html", "svelte", "vue"];
-  const docExts = ["pdf", "doc", "docx", "txt", "md", "rtf", "odt", "xls", "xlsx", "ppt", "pptx", "csv"];
+  const codeExts = [
+    "ts",
+    "js",
+    "tsx",
+    "jsx",
+    "rs",
+    "py",
+    "go",
+    "c",
+    "cpp",
+    "h",
+    "java",
+    "rb",
+    "php",
+    "css",
+    "html",
+    "svelte",
+    "vue",
+  ];
+  const docExts = [
+    "pdf",
+    "doc",
+    "docx",
+    "txt",
+    "md",
+    "rtf",
+    "odt",
+    "xls",
+    "xlsx",
+    "ppt",
+    "pptx",
+    "csv",
+  ];
   const archiveExts = ["zip", "tar", "gz", "rar", "7z", "bz2", "xz", "dmg", "iso"];
   const mediaExts = ["mp3", "mp4", "wav", "flac", "ogg", "avi", "mkv", "mov", "wmv", "m4a"];
 

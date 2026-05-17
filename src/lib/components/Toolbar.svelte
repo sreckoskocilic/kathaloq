@@ -18,7 +18,7 @@
   function goBack() {
     if ($breadcrumbs.length > 0) {
       const prev = $breadcrumbs[$breadcrumbs.length - 2];
-      onNavigate(prev ?? { id: null, name: $activeCatalog?.name ?? '' });
+      onNavigate(prev ?? { id: null, name: $activeCatalog?.name ?? "" });
     }
   }
 
@@ -30,12 +30,24 @@
   <div class="nav-buttons">
     <button class="nav-btn" disabled={!canGoBack} on:click={goBack} title="Back">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path
+          d="M10 3L5 8l5 5"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
       </svg>
     </button>
     <button class="nav-btn" disabled={!canGoUp} on:click={onGoUp} title="Up">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M3 10l5-5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path
+          d="M3 10l5-5 5 5"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
       </svg>
     </button>
   </div>
@@ -43,16 +55,29 @@
   <div class="address-bar">
     {#if $activeCatalog}
       <div class="address-segments">
-        <button class="segment" on:click={() => onNavigate({ id: null, name: $activeCatalog?.name ?? '' })}>
+        <button
+          class="segment"
+          on:click={() => onNavigate({ id: null, name: $activeCatalog?.name ?? "" })}
+        >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M2 6.5L8 2.5l6 4V13a1 1 0 01-1 1H3a1 1 0 01-1-1V6.5z" stroke="currentColor" stroke-width="1.2"/>
+            <path
+              d="M2 6.5L8 2.5l6 4V13a1 1 0 01-1 1H3a1 1 0 01-1-1V6.5z"
+              stroke="currentColor"
+              stroke-width="1.2"
+            />
           </svg>
           <span>{$activeCatalog.name}</span>
         </button>
         {#each $breadcrumbs as item (item.id)}
           <span class="separator">
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-              <path d="M3.5 2l4 3-4 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path
+                d="M3.5 2l4 3-4 3"
+                stroke="currentColor"
+                stroke-width="1.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
             </svg>
           </span>
           <button class="segment" on:click={() => onNavigate(item)}>
@@ -69,15 +94,10 @@
     {#if $activeCatalog}
       <div class="search-box">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-          <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.3"/>
-          <path d="M10 10l4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.3" />
+          <path d="M10 10l4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
         </svg>
-        <input
-          type="text"
-          placeholder="Search"
-          bind:value={searchInput}
-          on:input={onSearchInput}
-        />
+        <input type="text" placeholder="Search" bind:value={searchInput} on:input={onSearchInput} />
       </div>
     {/if}
   </div>

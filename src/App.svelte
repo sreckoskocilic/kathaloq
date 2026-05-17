@@ -56,7 +56,11 @@
     }
   }
 
-  function handleSelectFolder(catalogId: number, folder: { id: number; name: string } | null, path?: BreadcrumbItem[]) {
+  function handleSelectFolder(
+    catalogId: number,
+    folder: { id: number; name: string } | null,
+    path?: BreadcrumbItem[]
+  ) {
     $activeCatalogId = catalogId;
     $searchQuery = "";
     $breadcrumbs = path ?? (folder ? [{ id: folder.id, name: folder.name }] : []);
@@ -187,10 +191,7 @@
 </div>
 
 {#if showAddModal}
-  <AddCatalogModal
-    onSubmit={handleAddCatalog}
-    onClose={() => (showAddModal = false)}
-  />
+  <AddCatalogModal onSubmit={handleAddCatalog} onClose={() => (showAddModal = false)} />
 {/if}
 
 {#if deleteTarget}

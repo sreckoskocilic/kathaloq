@@ -32,24 +32,31 @@
 <svelte:window on:keydown={handleKeydown} />
 
 <div class="overlay" on:click={onClose} role="presentation">
-  <div class="modal" on:click|stopPropagation role="dialog" aria-modal="true" tabindex="-1" on:keydown={handleKeydown}>
+  <div
+    class="modal"
+    on:click|stopPropagation
+    role="dialog"
+    aria-modal="true"
+    tabindex="-1"
+    on:keydown={handleKeydown}
+  >
     <div class="modal-header">
       <h2>New Catalog</h2>
       <button class="btn-close-x" on:click={onClose} aria-label="Close">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <path
+            d="M3 3l8 8M11 3l-8 8"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          />
         </svg>
       </button>
     </div>
 
     <div class="field">
       <label for="catalog-name">Catalog name</label>
-      <input
-        id="catalog-name"
-        type="text"
-        bind:value={name}
-        placeholder="My External Drive"
-      />
+      <input id="catalog-name" type="text" bind:value={name} placeholder="My External Drive" />
     </div>
 
     <div class="field">

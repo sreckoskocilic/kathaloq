@@ -50,15 +50,24 @@
     {#if entry.is_dir}
       <button class="toggle" on:click|stopPropagation={toggle} tabindex="-1" aria-label="Expand">
         <svg width="8" height="8" viewBox="0 0 8 8" class:rotated={expanded}>
-          <path d="M2 1.5l3.5 2.5-3.5 2.5z" fill="currentColor"/>
+          <path d="M2 1.5l3.5 2.5-3.5 2.5z" fill="currentColor" />
         </svg>
       </button>
     {:else}
       <span class="toggle-spacer"></span>
     {/if}
 
-    <svg class="node-icon" width="13" height="13" viewBox="0 0 16 16" fill="var(--icon-folder)" opacity="0.7">
-      <path d="M1.5 3.5C1.5 2.67 2.17 2 3 2H6.17L7.67 3.5H13C13.83 3.5 14.5 4.17 14.5 5V12C14.5 12.83 13.83 13.5 13 13.5H3C2.17 13.5 1.5 12.83 1.5 12V3.5Z"/>
+    <svg
+      class="node-icon"
+      width="13"
+      height="13"
+      viewBox="0 0 16 16"
+      fill="var(--icon-folder)"
+      opacity="0.7"
+    >
+      <path
+        d="M1.5 3.5C1.5 2.67 2.17 2 3 2H6.17L7.67 3.5H13C13.83 3.5 14.5 4.17 14.5 5V12C14.5 12.83 13.83 13.5 13 13.5H3C2.17 13.5 1.5 12.83 1.5 12V3.5Z"
+      />
     </svg>
 
     <span class="node-name">{entry.name}</span>
@@ -67,7 +76,13 @@
   {#if expanded && children.length > 0}
     <div class="children" role="group">
       {#each children as child (child.id)}
-        <svelte:self entry={child} depth={depth + 1} {selectedId} {onSelect} ancestors={currentPath} />
+        <svelte:self
+          entry={child}
+          depth={depth + 1}
+          {selectedId}
+          {onSelect}
+          ancestors={currentPath}
+        />
       {/each}
     </div>
   {/if}
