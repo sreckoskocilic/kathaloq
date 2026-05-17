@@ -56,10 +56,10 @@
     }
   }
 
-  function handleSelectFolder(catalogId: number, folder: { id: number; name: string } | null) {
+  function handleSelectFolder(catalogId: number, folder: { id: number; name: string } | null, path?: BreadcrumbItem[]) {
     $activeCatalogId = catalogId;
     $searchQuery = "";
-    $breadcrumbs = folder ? [{ id: folder.id, name: folder.name }] : [];
+    $breadcrumbs = path ?? (folder ? [{ id: folder.id, name: folder.name }] : []);
   }
 
   function handleRequestDelete(catalog: Catalog) {

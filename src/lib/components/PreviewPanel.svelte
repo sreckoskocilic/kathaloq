@@ -11,6 +11,7 @@
   let mediaTags: MediaTags | null = null;
   let loading = false;
   let lastLoadKey = "";
+  let loadGeneration = 0;
 
   $: isSingle = entries.length === 1;
   $: entry = entries[0];
@@ -34,21 +35,29 @@
   });
 
   async function loadDetails(catId: number, items: FileEntry[]) {
+    const gen = ++loadGeneration;
     folderStats = null;
     mediaTags = null;
     loading = true;
 
     try {
       if (items.length === 1 && items[0].is_dir) {
-        folderStats = await api.getFolderStats(catId, items[0].id);
+        const result = await api.getFolderStats(catId, items[0].id);
+        if (gen !== loadGeneration) return;
+        folderStats = result;
       } else if (items.length === 1 && !items[0].is_dir) {
-        mediaTags = await api.getMediaTags(items[0].id);
+        const result = await api.getMediaTags(items[0].id);
+        if (gen !== loadGeneration) return;
+        mediaTags = result;
       } else if (items.length > 1) {
         const ids = items.map((e) => e.id);
-        folderStats = await api.getBulkStats(catId, ids);
+        const result = await api.getBulkStats(catId, ids);
+        if (gen !== loadGeneration) return;
+        folderStats = result;
       }
     } catch { /* */ }
 
+    if (gen !== loadGeneration) return;
     loading = false;
   }
 

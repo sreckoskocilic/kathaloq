@@ -7,7 +7,9 @@
   import type { Catalog, FileEntry } from "../types";
 
   export let onAddCatalog: () => void;
-  export let onSelectFolder: (catalogId: number, folder: { id: number; name: string } | null) => void;
+  import type { BreadcrumbItem } from "../types";
+
+  export let onSelectFolder: (catalogId: number, folder: { id: number; name: string } | null, path?: BreadcrumbItem[]) => void;
   export let onRequestDelete: (catalog: Catalog) => void;
   export let onRequestUpdate: (catalog: Catalog) => void;
   export let onOpenSettings: () => void;
@@ -86,10 +88,10 @@
     persistState();
   }
 
-  function handleTreeSelect(entry: FileEntry) {
+  function handleTreeSelect(entry: FileEntry, path: BreadcrumbItem[]) {
     activeCatalogId.set(entry.catalog_id);
     selectedFolderId = entry.id;
-    onSelectFolder(entry.catalog_id, { id: entry.id, name: entry.name });
+    onSelectFolder(entry.catalog_id, { id: entry.id, name: entry.name }, path);
     persistState();
   }
 

@@ -2,10 +2,13 @@
   import { getChildren } from "../services/tauri";
   import type { FileEntry } from "../types";
 
+  import type { BreadcrumbItem } from "../types";
+
   export let entry: FileEntry;
   export let depth: number = 0;
   export let selectedId: number | null = null;
-  export let onSelect: (entry: FileEntry) => void;
+  export let onSelect: (entry: FileEntry, path: BreadcrumbItem[]) => void;
+  export let ancestors: BreadcrumbItem[] = [];
 
   let expanded = false;
   let children: FileEntry[] = [];
@@ -22,8 +25,10 @@
     expanded = !expanded;
   }
 
+  $: currentPath = [...ancestors, { id: entry.id, name: entry.name }];
+
   async function handleClick() {
-    onSelect(entry);
+    onSelect(entry, currentPath);
     if (entry.is_dir && !expanded) {
       await toggle();
     }
@@ -62,7 +67,7 @@
   {#if expanded && children.length > 0}
     <div class="children" role="group">
       {#each children as child (child.id)}
-        <svelte:self entry={child} depth={depth + 1} {selectedId} {onSelect} />
+        <svelte:self entry={child} depth={depth + 1} {selectedId} {onSelect} ancestors={currentPath} />
       {/each}
     </div>
   {/if}

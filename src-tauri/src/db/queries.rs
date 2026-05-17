@@ -84,10 +84,11 @@ pub fn get_children(conn: &Connection, catalog_id: i64, parent_id: Option<i64>) 
 }
 
 pub fn search_files(conn: &Connection, catalog_id: i64, query: &str) -> rusqlite::Result<Vec<FileEntry>> {
-    let pattern = format!("%{query}%");
+    let escaped = query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+    let pattern = format!("%{escaped}%");
     let mut stmt = conn.prepare(
         "SELECT id, catalog_id, parent_id, name, path, is_dir, size, modified, extension
-         FROM file_entries WHERE catalog_id = ?1 AND name LIKE ?2
+         FROM file_entries WHERE catalog_id = ?1 AND name LIKE ?2 ESCAPE '\\'
          ORDER BY is_dir DESC, name ASC LIMIT 500",
     )?;
     let rows = stmt.query_map(params![catalog_id, pattern], map_file_entry)?;
@@ -213,6 +214,7 @@ pub fn get_bulk_stats(conn: &Connection, catalog_id: i64, ids: &[i64]) -> rusqli
     let mut folder_count: u64 = 0;
     let mut total_size: u64 = 0;
 
+    let root_ids: std::collections::HashSet<i64> = ids.iter().copied().collect();
     let mut all_ids: Vec<i64> = Vec::new();
     for &id in ids {
         let is_dir: bool = conn.query_row(
@@ -230,6 +232,9 @@ pub fn get_bulk_stats(conn: &Connection, catalog_id: i64, ids: &[i64]) -> rusqli
 
     let unique: std::collections::HashSet<i64> = all_ids.into_iter().collect();
     for id in unique {
+        if root_ids.contains(&id) {
+            continue;
+        }
         let (is_dir, size): (bool, u64) = conn.query_row(
             "SELECT is_dir, size FROM file_entries WHERE id = ?1 AND catalog_id = ?2",
             params![id, catalog_id],

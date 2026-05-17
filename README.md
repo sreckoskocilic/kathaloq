@@ -9,7 +9,7 @@ Tauri 2 + Svelte 5 + Rust.
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18+)
+- [Node.js](https://nodejs.org/) (v20+)
 - [Rust](https://www.rust-lang.org/tools/install) (stable)
 - Tauri system dependencies for your OS — see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
 
