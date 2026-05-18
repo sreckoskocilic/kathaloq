@@ -4,12 +4,12 @@ import type { Theme } from "../types";
 const STORAGE_KEY = "kathaloq-theme";
 
 function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "obsidian";
+  if (typeof window === "undefined") return "deep-void";
   const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored && ["obsidian", "ember", "slate", "terminal"].includes(stored)) {
+  if (stored && ["deep-void", "warm-carbon", "sage"].includes(stored)) {
     return stored as Theme;
   }
-  return "obsidian";
+  return "deep-void";
 }
 
 export const theme = writable<Theme>(getInitialTheme());

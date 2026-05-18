@@ -19,7 +19,7 @@ export interface FileEntry {
   extension: string | null;
 }
 
-export type Theme = "obsidian" | "ember" | "slate" | "terminal";
+export type Theme = "deep-void" | "warm-carbon" | "sage";
 
 export type SortField = "name" | "size" | "modified" | "extension";
 export type SortDirection = "asc" | "desc";

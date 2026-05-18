@@ -6,10 +6,9 @@
   export let onClose: () => void;
 
   const themes: { id: Theme; label: string; desc: string }[] = [
-    { id: "obsidian", label: "Obsidian", desc: "Neutral dark, blue accents" },
-    { id: "ember", label: "Ember", desc: "Deep indigo night" },
-    { id: "slate", label: "Slate", desc: "Warm charcoal" },
-    { id: "terminal", label: "Terminal", desc: "Green phosphor CRT" },
+    { id: "deep-void", label: "Deep Void", desc: "Near-black, electric blue" },
+    { id: "warm-carbon", label: "Warm Carbon", desc: "Charcoal with amber glow" },
+    { id: "sage", label: "Sage", desc: "Earthy olive green" },
   ];
 
   function handleKeydown(e: KeyboardEvent) {
@@ -183,25 +182,22 @@
     border-radius: 6px;
   }
 
-  .theme-preview[data-theme-preview="obsidian"] {
-    background: linear-gradient(135deg, #1a1b1e 0%, #202124 40%, #282a2d 100%);
-    border: 1px solid #33363a;
+  .theme-preview[data-theme-preview="deep-void"] {
+    background: linear-gradient(135deg, #0f1012 0%, #1a1c20 40%, #262830 100%);
+    border: 1px solid #2e3340;
+    box-shadow: inset 0 0 12px rgba(107, 159, 255, 0.06);
   }
 
-  .theme-preview[data-theme-preview="ember"] {
-    background: linear-gradient(135deg, #181a24 0%, #1e2030 40%, #252838 100%);
-    border: 1px solid #2d3044;
+  .theme-preview[data-theme-preview="warm-carbon"] {
+    background: linear-gradient(135deg, #141210 0%, #1e1c18 40%, #2a2722 100%);
+    border: 1px solid #342f28;
+    box-shadow: inset 0 0 12px rgba(232, 168, 76, 0.06);
   }
 
-  .theme-preview[data-theme-preview="slate"] {
-    background: linear-gradient(135deg, #1e2024 0%, #24262b 40%, #2b2e33 100%);
-    border: 1px solid #343740;
-  }
-
-  .theme-preview[data-theme-preview="terminal"] {
-    background: linear-gradient(135deg, #0c100c 0%, #111611 40%, #1a201a 100%);
-    border: 1px solid #243024;
-    box-shadow: inset 0 0 12px rgba(80, 184, 80, 0.06);
+  .theme-preview[data-theme-preview="sage"] {
+    background: linear-gradient(135deg, #111410 0%, #1a1e18 40%, #242820 100%);
+    border: 1px solid #303828;
+    box-shadow: inset 0 0 12px rgba(140, 192, 96, 0.06);
   }
 
   .theme-label {
