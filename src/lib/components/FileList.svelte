@@ -54,14 +54,13 @@
     selectedIds = new SvelteSet();
     lastClickedIndex = null;
     contextMenu = null;
+    notifySelection();
   }
 
   function notifySelection() {
     const selected = sortedFiles.filter((f) => selectedIds.has(f.id));
     onSelectionChange(selected);
   }
-
-  $: if ($currentFiles) notifySelection();
 
   function getSortIndicator(field: string): string {
     if (sortField !== field) return "";

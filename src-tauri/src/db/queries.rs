@@ -342,14 +342,14 @@ pub fn get_children_filtered(
         .join(", ");
 
     let sql = format!(
-        "WITH RECURSIVE ancestors(id) AS (
-            SELECT parent_id FROM file_entries
+        "WITH RECURSIVE ancestors(id, depth) AS (
+            SELECT parent_id, 1 FROM file_entries
             WHERE catalog_id = ?1 AND is_dir = 0 AND LOWER(extension) IN ({ext_list})
             AND parent_id IS NOT NULL
             UNION
-            SELECT fe2.parent_id FROM file_entries fe2
+            SELECT fe2.parent_id, a.depth + 1 FROM file_entries fe2
             INNER JOIN ancestors a ON fe2.id = a.id
-            WHERE fe2.parent_id IS NOT NULL
+            WHERE fe2.parent_id IS NOT NULL AND fe2.catalog_id = ?1 AND a.depth < 100
         )
         SELECT fe.id, fe.catalog_id, fe.parent_id, fe.name, fe.path, fe.is_dir, fe.size, fe.modified, fe.extension
         FROM file_entries fe

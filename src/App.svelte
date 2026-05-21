@@ -48,8 +48,7 @@
     try {
       const id = await api.startScan(path, name);
       await loadCatalogs();
-      $activeCatalogId = id;
-      await navigateToFolder(id, null);
+      navigateToFolder(id);
     } catch (e) {
       console.error("Scan failed:", e);
     } finally {
@@ -98,27 +97,31 @@
     }
   }
 
-  async function navigateToFolder(catalogId: number, folderId: number | null) {
+  function navigateToFolder(catalogId: number) {
+    $activeCatalogId = catalogId;
     $breadcrumbs = [];
     $searchQuery = "";
-    await loadChildren(catalogId, folderId, $mediaFilter);
   }
 
+  let requestId = 0;
+
   async function loadChildren(catalogId: number, parentId: number | null, filter?: string | null) {
+    const thisRequest = ++requestId;
     try {
-      if (filter) {
-        $currentFiles = await api.getChildrenFiltered(catalogId, parentId, filter);
-      } else {
-        $currentFiles = await api.getChildren(catalogId, parentId);
-      }
+      const files = filter
+        ? await api.getChildrenFiltered(catalogId, parentId, filter)
+        : await api.getChildren(catalogId, parentId);
+      if (thisRequest === requestId) $currentFiles = files;
     } catch (e) {
       console.error("Failed to load files:", e);
     }
   }
 
   async function performSearch(catalogId: number, query: string) {
+    const thisRequest = ++requestId;
     try {
-      $currentFiles = await api.searchFiles(catalogId, query);
+      const files = await api.searchFiles(catalogId, query);
+      if (thisRequest === requestId) $currentFiles = files;
     } catch (e) {
       console.error("Search failed:", e);
     }
@@ -165,7 +168,7 @@
   function handleNavigate(item: BreadcrumbItem) {
     if ($activeCatalogId === null) return;
     if (item.id === null) {
-      navigateToFolder($activeCatalogId, null);
+      navigateToFolder($activeCatalogId);
     } else {
       const idx = $breadcrumbs.findIndex((b) => b.id === item.id);
       if (idx >= 0) {

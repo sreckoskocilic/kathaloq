@@ -23,6 +23,7 @@
   }
 
   function toggleFilter(type: "audio" | "video") {
+    clearTimeout(searchTimeout);
     mediaFilter.set($mediaFilter === type ? null : type);
     searchInput = "";
     searchQuery.set("");

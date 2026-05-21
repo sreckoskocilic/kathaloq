@@ -2,26 +2,26 @@
 
 [![CI](https://github.com/sreckoskocilic/kathaloq/actions/workflows/ci.yml/badge.svg)](https://github.com/sreckoskocilic/kathaloq/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri&logoColor=white)](https://v2.tauri.app)
+[![Rust](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust&logoColor=white)](https://www.rust-lang.org)
 
-Local catalog browser for attached directories (removable drives, NAS mounts, etc). Indexes file trees into SQLite so you can search and browse them after the disk is disconnected.
+Indexes folders (external drives, NAS mounts, whatever) into a local SQLite database. Once indexed, you can search and browse the file tree even after unplugging the drive.
 
-Tauri 2 + Svelte 5 + Rust.
+Built with Tauri 2, Svelte 5, and Rust.
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) (v20+)
-- [Rust](https://www.rust-lang.org/tools/install) (stable)
-- Tauri system dependencies for your OS — see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+- [Node.js](https://nodejs.org/) v20+
+- [Rust](https://www.rust-lang.org/tools/install) stable
+- Tauri system deps for your OS: [tauri.app/start/prerequisites](https://v2.tauri.app/start/prerequisites/)
 
-### macOS
-
-Xcode Command Line Tools:
+On macOS you also need Xcode CLI tools:
 
 ```bash
 xcode-select --install
 ```
 
-### Linux (Debian/Ubuntu)
+On Debian/Ubuntu:
 
 ```bash
 sudo apt update
@@ -29,10 +29,7 @@ sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
   libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
-### Windows
-
-- [Microsoft Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-- [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (pre-installed on Windows 11)
+On Windows, install [Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/). WebView2 ships with Windows 11; on 10 you may need to install it separately.
 
 ## Build from source
 
@@ -43,11 +40,7 @@ npm install
 npm run tauri build
 ```
 
-Output:
-
-- macOS: `src-tauri/target/release/bundle/macos/Kathaloq.app` and `.dmg`
-- Linux: `src-tauri/target/release/bundle/deb/` and `appimage/`
-- Windows: `src-tauri/target/release/bundle/msi/` and `nsis/`
+The built app ends up in `src-tauri/target/release/bundle/` — `.app`/`.dmg` on macOS, `.deb`/`.appimage` on Linux, `.msi`/`.nsis` on Windows.
 
 ## Development
 
@@ -55,18 +48,14 @@ Output:
 npm run serve
 ```
 
-Starts frontend dev server + Rust backend with hot reload.
+Runs Vite + the Rust backend together with hot reload.
 
-## Test
-
-```bash
-npm test                              # Frontend (vitest)
-cd src-tauri && cargo test            # Backend (Rust)
-```
-
-## Lint
+## Test and lint
 
 ```bash
-npm run lint                          # ESLint + Clippy
-npm run format                        # Prettier
+npm test                              # vitest
+cd src-tauri && cargo test            # rust
+
+npm run lint                          # eslint + clippy
+npm run format                        # prettier
 ```
