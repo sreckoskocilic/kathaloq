@@ -17,6 +17,7 @@
     breadcrumbs,
     isLoading,
     searchQuery,
+    mediaFilter,
     activeCatalog,
   } from "./lib/stores/catalog";
   import { theme } from "./lib/stores/theme";
@@ -83,22 +84,33 @@
     }
   }
 
-  $: if ($searchQuery && $activeCatalogId !== null) {
-    performSearch($activeCatalogId, $searchQuery);
-  } else if (!$searchQuery && $activeCatalogId !== null) {
-    const lastCrumb = $breadcrumbs[$breadcrumbs.length - 1];
-    loadChildren($activeCatalogId, lastCrumb?.id ?? null);
+  $: {
+    const filter = $mediaFilter;
+    const query = $searchQuery;
+    const catalogId = $activeCatalogId;
+    const crumbs = $breadcrumbs;
+
+    if (query && catalogId !== null) {
+      performSearch(catalogId, query);
+    } else if (catalogId !== null) {
+      const parentId = crumbs[crumbs.length - 1]?.id ?? null;
+      loadChildren(catalogId, parentId, filter);
+    }
   }
 
   async function navigateToFolder(catalogId: number, folderId: number | null) {
     $breadcrumbs = [];
     $searchQuery = "";
-    await loadChildren(catalogId, folderId);
+    await loadChildren(catalogId, folderId, $mediaFilter);
   }
 
-  async function loadChildren(catalogId: number, parentId: number | null) {
+  async function loadChildren(catalogId: number, parentId: number | null, filter?: string | null) {
     try {
-      $currentFiles = await api.getChildren(catalogId, parentId);
+      if (filter) {
+        $currentFiles = await api.getChildrenFiltered(catalogId, parentId, filter);
+      } else {
+        $currentFiles = await api.getChildren(catalogId, parentId);
+      }
     } catch (e) {
       console.error("Failed to load files:", e);
     }
@@ -116,14 +128,14 @@
     if (!entry.is_dir || $activeCatalogId === null) return;
     $breadcrumbs = [...$breadcrumbs, { id: entry.id, name: entry.name }];
     $searchQuery = "";
-    loadChildren($activeCatalogId, entry.id);
+    loadChildren($activeCatalogId, entry.id, $mediaFilter);
   }
 
   function handleGoUp() {
     if ($activeCatalogId === null || $breadcrumbs.length === 0) return;
     $breadcrumbs = $breadcrumbs.slice(0, -1);
     const parentId = $breadcrumbs[$breadcrumbs.length - 1]?.id ?? null;
-    loadChildren($activeCatalogId, parentId);
+    loadChildren($activeCatalogId, parentId, $mediaFilter);
   }
 
   let removeTargets: FileEntry[] = [];
@@ -144,7 +156,7 @@
       await api.removeFileEntries(catalogId, ids);
       await loadCatalogs();
       const lastCrumb = $breadcrumbs[$breadcrumbs.length - 1];
-      await loadChildren(catalogId, lastCrumb?.id ?? null);
+      await loadChildren(catalogId, lastCrumb?.id ?? null, $mediaFilter);
     } catch (e) {
       console.error("Failed to remove entries:", e);
     }
@@ -158,7 +170,7 @@
       const idx = $breadcrumbs.findIndex((b) => b.id === item.id);
       if (idx >= 0) {
         $breadcrumbs = $breadcrumbs.slice(0, idx + 1);
-        loadChildren($activeCatalogId, item.id);
+        loadChildren($activeCatalogId, item.id, $mediaFilter);
       }
     }
   }
@@ -186,7 +198,7 @@
         <PreviewPanel entries={selectedEntries} catalogId={$activeCatalogId} />
       {/if}
     </div>
-    <StatusBar />
+    <StatusBar {selectedEntries} />
   </div>
 </div>
 
@@ -220,7 +232,7 @@
       await loadCatalogs();
       if ($activeCatalogId !== null) {
         const lastCrumb = $breadcrumbs[$breadcrumbs.length - 1];
-        await loadChildren($activeCatalogId, lastCrumb?.id ?? null);
+        await loadChildren($activeCatalogId, lastCrumb?.id ?? null, $mediaFilter);
       }
     }}
     onClose={() => (updateTarget = null)}

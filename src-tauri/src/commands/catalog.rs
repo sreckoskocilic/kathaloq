@@ -51,6 +51,17 @@ pub fn get_media_tags_bulk(db: State<Database>, file_entry_ids: Vec<i64>) -> Res
 }
 
 #[tauri::command]
+pub fn get_children_filtered(
+    db: State<Database>,
+    catalog_id: i64,
+    parent_id: Option<i64>,
+    media_type: String,
+) -> Result<Vec<FileEntry>, String> {
+    db.with_conn(|conn| db::get_children_filtered(conn, catalog_id, parent_id, &media_type))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn remove_file_entries(db: State<Database>, catalog_id: i64, ids: Vec<i64>) -> Result<(), String> {
     db.with_conn(|conn| {
         let all_ids = db::collect_descendant_ids(conn, &ids)?;

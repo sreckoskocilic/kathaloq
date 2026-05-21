@@ -316,6 +316,67 @@ pub fn get_media_tags_bulk(conn: &Connection, file_entry_ids: &[i64]) -> rusqlit
     Ok(result)
 }
 
+pub fn get_children_filtered(
+    conn: &Connection,
+    catalog_id: i64,
+    parent_id: Option<i64>,
+    media_type: &str,
+) -> rusqlite::Result<Vec<FileEntry>> {
+    let extensions: &[&str] = match media_type {
+        "audio" => &["mp3", "flac", "ogg", "opus", "wav", "aiff", "aif", "m4a", "m4b", "aac", "wma", "ape", "wv", "mpc"],
+        "video" => &["mp4", "m4v", "mov", "avi", "mkv", "wmv", "webm", "flv"],
+        _ => return get_children(conn, catalog_id, parent_id),
+    };
+
+    let parent_clause = if parent_id.is_some() {
+        "fe.parent_id = ?2"
+    } else {
+        "fe.parent_id IS NULL"
+    };
+    let offset: usize = if parent_id.is_some() { 3 } else { 2 };
+    let ext_list: String = extensions
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", offset + i))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = format!(
+        "WITH RECURSIVE ancestors(id) AS (
+            SELECT parent_id FROM file_entries
+            WHERE catalog_id = ?1 AND is_dir = 0 AND LOWER(extension) IN ({ext_list})
+            AND parent_id IS NOT NULL
+            UNION
+            SELECT fe2.parent_id FROM file_entries fe2
+            INNER JOIN ancestors a ON fe2.id = a.id
+            WHERE fe2.parent_id IS NOT NULL
+        )
+        SELECT fe.id, fe.catalog_id, fe.parent_id, fe.name, fe.path, fe.is_dir, fe.size, fe.modified, fe.extension
+        FROM file_entries fe
+        WHERE fe.catalog_id = ?1
+          AND {parent_clause}
+          AND (
+            (fe.is_dir = 0 AND LOWER(fe.extension) IN ({ext_list}))
+            OR
+            (fe.is_dir = 1 AND fe.id IN (SELECT id FROM ancestors))
+          )
+        ORDER BY fe.is_dir DESC, fe.name ASC"
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    params.push(Box::new(catalog_id));
+    if let Some(pid) = parent_id {
+        params.push(Box::new(pid));
+    }
+    for ext in extensions {
+        params.push(Box::new(ext.to_string()));
+    }
+    let refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+    let rows = stmt.query_map(refs.as_slice(), map_file_entry)?;
+    rows.collect()
+}
+
 fn map_file_entry(row: &rusqlite::Row) -> rusqlite::Result<FileEntry> {
     Ok(FileEntry {
         id: row.get(0)?,

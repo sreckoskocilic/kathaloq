@@ -21,6 +21,7 @@ export interface FileEntry {
 
 export type Theme = "deep-void" | "warm-carbon" | "sage";
 
+export type MediaFilter = "audio" | "video" | null;
 export type SortField = "name" | "size" | "modified" | "extension";
 export type SortDirection = "asc" | "desc";
 

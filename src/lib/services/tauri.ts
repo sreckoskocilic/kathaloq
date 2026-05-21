@@ -32,6 +32,14 @@ export async function applyCatalogUpdate(catalogId: number): Promise<UpdatePrevi
   return invoke<UpdatePreview>("apply_catalog_update", { catalogId });
 }
 
+export async function getChildrenFiltered(
+  catalogId: number,
+  parentId: number | null,
+  mediaType: string
+): Promise<FileEntry[]> {
+  return invoke<FileEntry[]>("get_children_filtered", { catalogId, parentId, mediaType });
+}
+
 export async function removeFileEntries(catalogId: number, ids: number[]): Promise<void> {
   return invoke<void>("remove_file_entries", { catalogId, ids });
 }

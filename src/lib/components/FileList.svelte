@@ -56,10 +56,12 @@
     contextMenu = null;
   }
 
-  $: {
+  function notifySelection() {
     const selected = sortedFiles.filter((f) => selectedIds.has(f.id));
     onSelectionChange(selected);
   }
+
+  $: if ($currentFiles) notifySelection();
 
   function getSortIndicator(field: string): string {
     if (sortField !== field) return "";
@@ -84,6 +86,7 @@
       selectedIds = new SvelteSet([entry.id]);
       lastClickedIndex = index;
     }
+    notifySelection();
   }
 
   function handleDblClick(entry: FileEntry) {

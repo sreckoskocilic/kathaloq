@@ -2,14 +2,22 @@
   import { activeCatalog, currentFiles } from "../stores/catalog";
   import { theme } from "../stores/theme";
   import { formatSize } from "../services/format";
+  import type { FileEntry } from "../types";
+
+  export let selectedEntries: FileEntry[] = [];
 
   $: fileCount = $currentFiles.filter((f) => !f.is_dir).length;
   $: folderCount = $currentFiles.filter((f) => f.is_dir).length;
+  $: selectionSize = selectedEntries.reduce((sum, e) => sum + e.size, 0);
 </script>
 
 <footer class="status-bar">
   <div class="status-left">
-    {#if $activeCatalog}
+    {#if selectedEntries.length > 1}
+      <span class="stat highlight">{selectedEntries.length} selected</span>
+      <span class="sep">·</span>
+      <span class="stat highlight">{formatSize(selectionSize)}</span>
+    {:else if $activeCatalog}
       <span class="stat">{folderCount} folders</span>
       <span class="sep">·</span>
       <span class="stat">{fileCount} files</span>
@@ -51,6 +59,10 @@
     font-family: var(--font-family-mono);
     font-size: 12px;
     color: var(--statusbar-text);
+  }
+
+  .stat.highlight {
+    color: var(--accent);
   }
 
   .stat.muted {

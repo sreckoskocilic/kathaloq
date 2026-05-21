@@ -27,6 +27,7 @@ pub fn run() {
             commands::delete_catalog,
             commands::get_children,
             commands::search_files,
+            commands::get_children_filtered,
             commands::preview_catalog_update,
             commands::apply_catalog_update,
             commands::remove_file_entries,
