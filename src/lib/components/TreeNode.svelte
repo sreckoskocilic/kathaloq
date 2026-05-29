@@ -157,8 +157,4 @@
   .node-row.selected .node-name {
     color: var(--text-primary);
   }
-
-  .children {
-    /* spacing handled by depth prop */
-  }
 </style>
