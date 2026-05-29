@@ -128,8 +128,6 @@ pub fn collect_descendant_ids(conn: &Connection, root_ids: &[i64]) -> rusqlite::
             let children: Vec<i64> = stmt
                 .query_map(params![parent_id], |row| row.get(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            // Guard against circular parent_id chains (corrupt data): only
-            // visit each id once, otherwise the walk loops forever / OOMs.
             for child in children {
                 if seen.insert(child) {
                     all_ids.push(child);
@@ -219,12 +217,10 @@ pub fn get_folder_stats(conn: &Connection, catalog_id: i64, folder_id: i64) -> r
 }
 
 pub fn get_bulk_stats(conn: &Connection, catalog_id: i64, ids: &[i64]) -> rusqlite::Result<FolderStats> {
-    let mut file_count: u64 = 0;
-    let mut folder_count: u64 = 0;
-    let mut total_size: u64 = 0;
-
-    let root_ids: std::collections::HashSet<i64> = ids.iter().copied().collect();
-    let mut all_ids: Vec<i64> = Vec::new();
+    // Build the set of entries the selection covers: each selected file counts
+    // itself; each selected folder contributes its descendants (recursively),
+    // excluding the folder node itself. Overlaps are de-duplicated.
+    let mut to_count: Vec<i64> = Vec::new();
     for &id in ids {
         let is_dir: bool = conn.query_row(
             "SELECT is_dir FROM file_entries WHERE id = ?1 AND catalog_id = ?2",
@@ -232,16 +228,22 @@ pub fn get_bulk_stats(conn: &Connection, catalog_id: i64, ids: &[i64]) -> rusqli
             |row| Ok(row.get::<_, i32>(0)? != 0),
         )?;
         if is_dir {
-            let descendants = collect_descendant_ids(conn, &[id])?;
-            all_ids.extend(descendants);
+            for d in collect_descendant_ids(conn, &[id])? {
+                if d != id {
+                    to_count.push(d);
+                }
+            }
         } else {
-            all_ids.push(id);
+            to_count.push(id);
         }
     }
 
-    let unique: std::collections::HashSet<i64> = all_ids.into_iter().collect();
-    for id in unique {
-        if root_ids.contains(&id) {
+    let mut file_count: u64 = 0;
+    let mut folder_count: u64 = 0;
+    let mut total_size: u64 = 0;
+    let mut counted: HashSet<i64> = HashSet::new();
+    for id in to_count {
+        if !counted.insert(id) {
             continue;
         }
         let (is_dir, size): (bool, u64) = conn.query_row(
@@ -398,4 +400,274 @@ fn map_file_entry(row: &rusqlite::Row) -> rusqlite::Result<FileEntry> {
         modified: row.get(7)?,
         extension: row.get(8)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::run_migrations;
+
+    fn conn() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_migrations(&c).unwrap();
+        c
+    }
+
+    fn catalog(c: &Connection) -> i64 {
+        insert_catalog(c, "test", "/root", "2026-01-01T00:00:00Z").unwrap()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn dir(c: &Connection, cat: i64, parent: Option<i64>, name: &str) -> i64 {
+        insert_file_entry(c, cat, parent, name, name, true, 0, None, None).unwrap()
+    }
+
+    fn file(c: &Connection, cat: i64, parent: Option<i64>, name: &str, size: u64, ext: &str) -> i64 {
+        insert_file_entry(c, cat, parent, name, name, false, size, None, Some(ext)).unwrap()
+    }
+
+    #[test]
+    fn collect_descendant_ids_walks_full_tree() {
+        let c = conn();
+        let cat = catalog(&c);
+        let a = dir(&c, cat, None, "a");
+        let b = dir(&c, cat, Some(a), "a/b");
+        let f = file(&c, cat, Some(b), "a/b/f.txt", 1, "txt");
+
+        let mut ids = collect_descendant_ids(&c, &[a]).unwrap();
+        ids.sort();
+        let mut expected = vec![a, b, f];
+        expected.sort();
+        assert_eq!(ids, expected);
+    }
+
+    // Regression for the M1 fix: a circular parent_id chain must terminate
+    // (without the visited-set guard this loops forever / OOMs).
+    #[test]
+    fn collect_descendant_ids_terminates_on_cycle() {
+        let c = conn();
+        let cat = catalog(&c);
+        let a = dir(&c, cat, None, "a");
+        let b = dir(&c, cat, Some(a), "a/b");
+        // Make it circular: a.parent = b, b.parent = a.
+        c.execute("UPDATE file_entries SET parent_id = ?1 WHERE id = ?2", params![b, a])
+            .unwrap();
+
+        let mut ids = collect_descendant_ids(&c, &[a]).unwrap();
+        ids.sort();
+        let mut expected = vec![a, b];
+        expected.sort();
+        assert_eq!(ids, expected, "each id visited exactly once");
+    }
+
+    // rev() delete order must satisfy the parent_id FK (children before parents).
+    #[test]
+    fn delete_file_entries_by_ids_respects_parent_fk() {
+        let c = conn();
+        let cat = catalog(&c);
+        let a = dir(&c, cat, None, "a");
+        let b = dir(&c, cat, Some(a), "a/b");
+        let _f = file(&c, cat, Some(b), "a/b/f.txt", 1, "txt");
+
+        let ids = collect_descendant_ids(&c, &[a]).unwrap();
+        delete_file_entries_by_ids(&c, &ids).expect("delete must not violate FK");
+        assert_eq!(get_all_entries(&c, cat).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn get_children_orders_dirs_first_then_name() {
+        let c = conn();
+        let cat = catalog(&c);
+        file(&c, cat, None, "zebra.txt", 1, "txt");
+        file(&c, cat, None, "apple.txt", 1, "txt");
+        dir(&c, cat, None, "mid");
+
+        let names: Vec<String> = get_children(&c, cat, None)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(names, vec!["mid", "apple.txt", "zebra.txt"]);
+    }
+
+    #[test]
+    fn get_children_filters_by_parent() {
+        let c = conn();
+        let cat = catalog(&c);
+        let d = dir(&c, cat, None, "d");
+        file(&c, cat, Some(d), "d/inside.txt", 1, "txt");
+        file(&c, cat, None, "root.txt", 1, "txt");
+
+        let root = get_children(&c, cat, None).unwrap();
+        assert_eq!(root.len(), 2); // d + root.txt
+        let inside = get_children(&c, cat, Some(d)).unwrap();
+        assert_eq!(inside.len(), 1);
+        assert_eq!(inside[0].name, "d/inside.txt");
+    }
+
+    #[test]
+    fn get_children_filtered_keeps_audio_and_ancestor_dirs() {
+        let c = conn();
+        let cat = catalog(&c);
+        let music = dir(&c, cat, None, "music");
+        file(&c, cat, Some(music), "music/deep.mp3", 1, "mp3");
+        file(&c, cat, None, "song.mp3", 1, "mp3");
+        file(&c, cat, None, "clip.mp4", 1, "mp4");
+        file(&c, cat, None, "notes.txt", 1, "txt");
+
+        let audio: Vec<String> = get_children_filtered(&c, cat, None, "audio")
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        // dir first (ancestor of deep.mp3), then the root-level audio file.
+        assert_eq!(audio, vec!["music", "song.mp3"]);
+
+        let video: Vec<String> = get_children_filtered(&c, cat, None, "video")
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(video, vec!["clip.mp4"]);
+    }
+
+    #[test]
+    fn get_children_filtered_is_catalog_scoped() {
+        let c = conn();
+        let cat1 = catalog(&c);
+        let cat2 = insert_catalog(&c, "other", "/other", "2026-01-01T00:00:00Z").unwrap();
+        let d2 = dir(&c, cat2, None, "m");
+        file(&c, cat2, Some(d2), "m/x.mp3", 1, "mp3");
+
+        let res = get_children_filtered(&c, cat1, None, "audio").unwrap();
+        assert!(res.is_empty(), "cat1 must not see cat2 entries");
+    }
+
+    #[test]
+    fn search_files_escapes_like_wildcards() {
+        let c = conn();
+        let cat = catalog(&c);
+        file(&c, cat, None, "100%done.txt", 1, "txt");
+        file(&c, cat, None, "100Xdone.txt", 1, "txt");
+
+        let hits: Vec<String> = search_files(&c, cat, "100%")
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(hits, vec!["100%done.txt"], "% is a literal, not a wildcard");
+    }
+
+    #[test]
+    fn search_files_is_catalog_scoped() {
+        let c = conn();
+        let cat1 = catalog(&c);
+        let cat2 = insert_catalog(&c, "other", "/o", "2026-01-01T00:00:00Z").unwrap();
+        file(&c, cat2, None, "secret.txt", 1, "txt");
+        assert!(search_files(&c, cat1, "secret").unwrap().is_empty());
+    }
+
+    #[test]
+    fn recalc_catalog_stats_counts_files_only() {
+        let c = conn();
+        let cat = catalog(&c);
+        file(&c, cat, None, "a.txt", 10, "txt");
+        file(&c, cat, None, "b.txt", 20, "txt");
+        dir(&c, cat, None, "d");
+
+        recalc_catalog_stats(&c, cat).unwrap();
+        let cat_row = get_catalog_by_id(&c, cat).unwrap();
+        assert_eq!(cat_row.total_files, 2);
+        assert_eq!(cat_row.total_size, 30);
+    }
+
+    #[test]
+    fn get_folder_stats_aggregates_descendants() {
+        let c = conn();
+        let cat = catalog(&c);
+        let a = dir(&c, cat, None, "a");
+        file(&c, cat, Some(a), "a/f1.txt", 100, "txt");
+        let b = dir(&c, cat, Some(a), "a/b");
+        file(&c, cat, Some(b), "a/b/f2.txt", 50, "txt");
+
+        let stats = get_folder_stats(&c, cat, a).unwrap();
+        assert_eq!(stats.file_count, 2);
+        assert_eq!(stats.folder_count, 1); // b, excluding a itself
+        assert_eq!(stats.total_size, 150);
+    }
+
+    #[test]
+    fn get_bulk_stats_for_folder_counts_descendants() {
+        let c = conn();
+        let cat = catalog(&c);
+        let a = dir(&c, cat, None, "a");
+        file(&c, cat, Some(a), "a/f1.txt", 100, "txt");
+        let b = dir(&c, cat, Some(a), "a/b");
+        file(&c, cat, Some(b), "a/b/f2.txt", 50, "txt");
+
+        let stats = get_bulk_stats(&c, cat, &[a]).unwrap();
+        assert_eq!(stats.file_count, 2);
+        assert_eq!(stats.folder_count, 1); // b, excluding the selected root a
+        assert_eq!(stats.total_size, 150);
+    }
+
+    #[test]
+    fn get_bulk_stats_counts_selected_files_plus_folder_contents() {
+        let c = conn();
+        let cat = catalog(&c);
+        let a = dir(&c, cat, None, "a");
+        file(&c, cat, Some(a), "a/f1.txt", 100, "txt");
+        let standalone = file(&c, cat, None, "x.txt", 5, "txt");
+
+        let stats = get_bulk_stats(&c, cat, &[a, standalone]).unwrap();
+        assert_eq!(stats.file_count, 2); // a/f1.txt (folder content) + x.txt (selected file)
+        assert_eq!(stats.folder_count, 0);
+        assert_eq!(stats.total_size, 105);
+    }
+
+    // A file selected alongside its containing folder must not be double-counted.
+    #[test]
+    fn get_bulk_stats_dedupes_overlap() {
+        let c = conn();
+        let cat = catalog(&c);
+        let a = dir(&c, cat, None, "a");
+        let f1 = file(&c, cat, Some(a), "a/f1.txt", 100, "txt");
+
+        let stats = get_bulk_stats(&c, cat, &[a, f1]).unwrap();
+        assert_eq!(stats.file_count, 1);
+        assert_eq!(stats.total_size, 100);
+    }
+
+    #[test]
+    fn media_tags_roundtrip_and_bulk() {
+        let c = conn();
+        let cat = catalog(&c);
+        let f = file(&c, cat, None, "song.mp3", 1, "mp3");
+        insert_media_tags(
+            &c,
+            f,
+            Some(123.5),
+            Some(320),
+            Some(44100),
+            Some(2),
+            Some("Title"),
+            Some("Artist"),
+            Some("Album"),
+            Some("Genre"),
+            Some(2020),
+            Some(3),
+        )
+        .unwrap();
+
+        let tags = get_media_tags(&c, f).unwrap().expect("tags present");
+        assert_eq!(tags.duration_secs, Some(123.5));
+        assert_eq!(tags.bitrate, Some(320));
+        assert_eq!(tags.title.as_deref(), Some("Title"));
+        assert_eq!(tags.track_number, Some(3));
+
+        // Missing file -> None; bulk skips missing ids.
+        assert!(get_media_tags(&c, 99999).unwrap().is_none());
+        assert_eq!(get_media_tags_bulk(&c, &[f, 99999]).unwrap().len(), 1);
+    }
 }

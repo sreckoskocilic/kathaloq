@@ -22,9 +22,6 @@ pub fn extract_and_store_tags(conn: &Connection, file_entry_id: i64, file_path: 
     let tagged_file = match Probe::open(file_path).and_then(|p| p.read()) {
         Ok(f) => f,
         Err(_) => {
-            // Don't persist a placeholder row on read failure: a NULL row would
-            // make get_media_tags() return Some, permanently masking the file
-            // from re-tagging once it becomes readable. Leave it untagged.
             return false;
         }
     };
@@ -74,5 +71,25 @@ pub fn extract_and_store_tags(conn: &Connection, file_entry_id: i64, file_path: 
             eprintln!("db: failed to insert media tags for {:?}: {}", file_path, e);
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_media_file;
+
+    #[test]
+    fn recognizes_media_extensions() {
+        assert!(is_media_file(Some("mp3")));
+        assert!(is_media_file(Some("MP3"))); // case-insensitive
+        assert!(is_media_file(Some("flac")));
+        assert!(is_media_file(Some("mp4")));
+    }
+
+    #[test]
+    fn rejects_non_media() {
+        assert!(!is_media_file(Some("txt")));
+        assert!(!is_media_file(Some("")));
+        assert!(!is_media_file(None));
     }
 }

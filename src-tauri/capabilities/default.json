@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default capabilities for Kathaloq",
   "windows": ["main"],
-  "permissions": ["core:default", "shell:allow-open", "dialog:allow-open"]
+  "permissions": ["core:default", "dialog:allow-open"]
 }

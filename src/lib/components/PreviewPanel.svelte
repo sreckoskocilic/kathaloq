@@ -61,8 +61,8 @@
         if (gen !== loadGeneration) return;
         folderStats = result;
       }
-    } catch {
-      /* */
+    } catch (e) {
+      console.error(e);
     }
 
     if (gen !== loadGeneration) return;

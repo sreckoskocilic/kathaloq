@@ -59,3 +59,7 @@ export async function getMediaTags(fileEntryId: number): Promise<MediaTags | nul
 export async function getMediaTagsBulk(fileEntryIds: number[]): Promise<MediaTags[]> {
   return invoke<MediaTags[]>("get_media_tags_bulk", { fileEntryIds });
 }
+
+export async function getThirdPartyLicenses(): Promise<string> {
+  return invoke<string>("third_party_licenses");
+}

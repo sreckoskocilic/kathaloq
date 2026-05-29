@@ -35,7 +35,7 @@
           .then((s) => {
             folderStats = s;
           })
-          .catch(() => {})
+          .catch((e) => console.error(e))
       );
     } else if (isSingle && !entry.is_dir) {
       promises.push(
@@ -44,7 +44,7 @@
           .then((t) => {
             mediaTags = t;
           })
-          .catch(() => {})
+          .catch((e) => console.error(e))
       );
     } else if (isMulti) {
       promises.push(
@@ -56,7 +56,7 @@
           .then((s) => {
             bulkStats = s;
           })
-          .catch(() => {})
+          .catch((e) => console.error(e))
       );
       const fileIds = entries.filter((e) => !e.is_dir).map((e) => e.id);
       if (fileIds.length > 0) {
@@ -66,7 +66,7 @@
             .then((t) => {
               bulkMediaTags = t;
             })
-            .catch(() => {})
+            .catch((e) => console.error(e))
         );
       }
     }
@@ -190,9 +190,7 @@
           </div>
         {/if}
 
-        {#if !entry.is_dir && loading}
-          <!-- loading tags -->
-        {:else if !entry.is_dir && mediaTags}
+        {#if !entry.is_dir && mediaTags && !loading}
           <div class="info-divider"></div>
           <div class="section-title">Media Info</div>
 

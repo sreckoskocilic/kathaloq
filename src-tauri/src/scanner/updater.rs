@@ -166,7 +166,6 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
     let mut tags_backfilled: u64 = 0;
     let mut seen_paths: HashSet<String> = HashSet::new();
 
-    // We need parent_id mapping for new entries
     let mut path_to_id: HashMap<String, i64> = HashMap::new();
     for (path, entry) in &db_map {
         path_to_id.insert(path.clone(), entry.id);
@@ -255,7 +254,6 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
         delete_file_entries_by_ids(conn, &ids_to_delete).map_err(|e| e.to_string())?;
     }
 
-    // Recompute stats
     let total_files = (unchanged + updated + added) - disk_entries.iter().filter(|e| e.is_dir).count() as u64;
     let total_size: u64 = disk_entries.iter().filter(|e| !e.is_dir).map(|e| e.size).sum();
     update_catalog_stats(conn, catalog_id, total_files, total_size).map_err(|e| e.to_string())?;
@@ -271,4 +269,128 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
         unchanged,
         tags_to_backfill: tags_backfilled,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{get_all_entries, get_catalog_by_id, insert_catalog, run_migrations};
+    use crate::scanner::scan_directory;
+    use rusqlite::Connection;
+    use std::path::PathBuf;
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir()
+                .join(format!("kathaloq-test-{tag}-{}-{nanos}", std::process::id()));
+            std::fs::create_dir_all(&path).unwrap();
+            TempDir { path }
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn conn() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_migrations(&c).unwrap();
+        c
+    }
+
+    fn write(root: &Path, rel: &str, content: &[u8]) {
+        let p = root.join(rel);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(p, content).unwrap();
+    }
+
+    #[test]
+    fn scan_directory_indexes_tree_and_skips_hidden() {
+        let tmp = TempDir::new("scan");
+        write(&tmp.path, "root.txt", b"hello");
+        write(&tmp.path, "sub/a.txt", b"ab");
+        write(&tmp.path, ".hidden", b"x");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+
+        let entries = get_all_entries(&c, cat).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(entries.len(), 3, "root.txt, sub, sub/a.txt; .hidden skipped");
+        assert!(!names.contains(&".hidden"));
+
+        let sub = entries.iter().find(|e| e.name == "sub").unwrap();
+        let a = entries.iter().find(|e| e.name == "a.txt").unwrap();
+        assert_eq!(a.parent_id, Some(sub.id), "a.txt parented under sub");
+
+        let cat_row = get_catalog_by_id(&c, cat).unwrap();
+        assert_eq!(cat_row.total_files, 2);
+        assert_eq!(cat_row.total_size, 7);
+    }
+
+    #[test]
+    fn apply_update_reconciles_add_update_delete() {
+        let tmp = TempDir::new("apply");
+        write(&tmp.path, "keep.txt", b"AAAA");
+        write(&tmp.path, "change.txt", b"AAAA");
+        write(&tmp.path, "sub/del.txt", b"X");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+        assert_eq!(get_all_entries(&c, cat).unwrap().len(), 4);
+
+        // Mutate the tree: grow one file, delete one, add one.
+        write(&tmp.path, "change.txt", b"AAAAAAAA");
+        std::fs::remove_file(tmp.path.join("sub/del.txt")).unwrap();
+        write(&tmp.path, "new.txt", b"NN");
+
+        let preview = apply_update(&c, cat, &tmp.path).unwrap();
+        assert_eq!(preview.added, 1, "new.txt");
+        assert_eq!(preview.updated, 1, "change.txt");
+        assert_eq!(preview.deleted_files, 1, "del.txt");
+        assert_eq!(preview.deleted_folders, 0);
+        assert_eq!(preview.unchanged, 2, "keep.txt + sub dir");
+
+        let entries = get_all_entries(&c, cat).unwrap();
+        assert_eq!(entries.len(), 4, "keep, change, sub, new");
+        assert!(entries.iter().all(|e| e.name != "del.txt"));
+
+        let cat_row = get_catalog_by_id(&c, cat).unwrap();
+        assert_eq!(cat_row.total_files, 3, "keep, change, new");
+    }
+
+    #[test]
+    fn preview_update_does_not_mutate_db() {
+        let tmp = TempDir::new("preview");
+        write(&tmp.path, "keep.txt", b"AAAA");
+        write(&tmp.path, "sub/del.txt", b"X");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+        let before = get_all_entries(&c, cat).unwrap().len();
+
+        write(&tmp.path, "new.txt", b"NN");
+        let preview = preview_update(&c, cat, &tmp.path).unwrap();
+        assert_eq!(preview.added, 1);
+        assert_eq!(preview.deleted_files, 0);
+
+        // DB untouched by a preview.
+        assert_eq!(get_all_entries(&c, cat).unwrap().len(), before);
+    }
 }

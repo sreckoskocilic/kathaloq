@@ -9,7 +9,6 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_dir = app
@@ -35,6 +34,7 @@ pub fn run() {
             commands::get_bulk_stats,
             commands::get_media_tags,
             commands::get_media_tags_bulk,
+            commands::third_party_licenses,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

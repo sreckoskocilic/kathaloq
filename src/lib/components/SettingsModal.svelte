@@ -1,6 +1,7 @@
 <script lang="ts">
   import { columns, toggleColumn } from "../stores/settings";
   import { theme } from "../stores/theme";
+  import { getThirdPartyLicenses } from "../services/tauri";
   import type { Theme } from "../types";
 
   export let onClose: () => void;
@@ -11,8 +12,31 @@
     { id: "sage", label: "Sage", desc: "Earthy olive green" },
   ];
 
+  let showLicenses = false;
+  let licensesHtml = "";
+  let licensesLoading = false;
+
+  async function openLicenses() {
+    showLicenses = true;
+    if (licensesHtml) return;
+    licensesLoading = true;
+    try {
+      licensesHtml = await getThirdPartyLicenses();
+    } catch (e) {
+      console.error(e);
+      licensesHtml = "<p>Failed to load licenses.</p>";
+    }
+    licensesLoading = false;
+  }
+
+  function closeLicenses() {
+    showLicenses = false;
+  }
+
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") onClose();
+    if (e.key !== "Escape") return;
+    if (showLicenses) closeLicenses();
+    else onClose();
   }
 </script>
 
@@ -78,11 +102,49 @@
       </div>
     </section>
 
+    <section>
+      <h3>About</h3>
+      <button class="btn-licenses" on:click={openLicenses}>Open Source Licenses</button>
+    </section>
+
     <div class="actions">
       <button class="btn-done" on:click={onClose}>Done</button>
     </div>
   </div>
 </div>
+
+{#if showLicenses}
+  <div class="overlay licenses-overlay" on:click={closeLicenses} role="presentation">
+    <div
+      class="licenses-modal"
+      on:click|stopPropagation
+      on:keydown={handleKeydown}
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+    >
+      <div class="modal-header">
+        <h2>Open Source Licenses</h2>
+        <button class="btn-close-x" on:click={closeLicenses} aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path
+              d="M3 3l8 8M11 3l-8 8"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+      </div>
+      {#if licensesLoading}
+        <p class="lic-status">Loading…</p>
+      {:else}
+        <iframe class="lic-frame" title="Third party licenses" sandbox="" srcdoc={licensesHtml}
+        ></iframe>
+      {/if}
+    </div>
+  </div>
+{/if}
 
 <style>
   .overlay {
@@ -273,5 +335,48 @@
     background: var(--accent-hover);
     transform: translateY(-1px);
     box-shadow: var(--shadow-sm);
+  }
+
+  .btn-licenses {
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-primary);
+    transition: all 0.12s;
+  }
+
+  .btn-licenses:hover {
+    background: var(--bg-hover);
+    border-color: var(--text-muted);
+  }
+
+  .licenses-overlay {
+    z-index: 110;
+  }
+
+  .licenses-modal {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    width: min(760px, 90vw);
+    height: min(80vh, 700px);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .lic-frame {
+    flex: 1;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .lic-status {
+    color: var(--text-muted);
+    font-size: 13px;
   }
 </style>

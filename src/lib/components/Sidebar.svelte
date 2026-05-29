@@ -21,7 +21,6 @@
   let rootFolders: SvelteMap<number, FileEntry[]> = new SvelteMap();
   let selectedFolderId: number | null = $sidebarState.selectedFolderId;
 
-  // Restore active catalog from persisted state
   $: if (
     $catalogs.length > 0 &&
     $activeCatalogId === null &&
@@ -41,7 +40,6 @@
     }
   }
 
-  // Restore expanded catalogs — load their root folders
   $: if ($catalogs.length > 0) {
     restoreExpandedFolders();
   }
@@ -57,13 +55,14 @@
             );
             rootFolders.set(catalogId, children);
             rootFolders = rootFolders;
-          } catch (_) {}
+          } catch (e) {
+            console.error(e);
+          }
         }
       }
     }
   }
 
-  // Persist sidebar state whenever it changes
   function persistState() {
     sidebarState.set({
       expandedCatalogIds: [...expandedCatalogs],

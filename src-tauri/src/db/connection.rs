@@ -19,10 +19,6 @@ impl Database {
         write_conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         run_migrations(&write_conn)?;
 
-        // Separate read connection. WAL lets it read the last committed snapshot
-        // while the write connection holds a long transaction (e.g. during a
-        // scan), so query commands don't block on the writer. query_only guards
-        // against accidental writes through this handle.
         let read_conn = Connection::open(&db_path)?;
         read_conn.execute_batch(
             "PRAGMA query_only=ON; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
@@ -34,7 +30,6 @@ impl Database {
         })
     }
 
-    /// Run a closure against the write connection.
     pub fn with_conn<F, T>(&self, f: F) -> Result<T, rusqlite::Error>
     where
         F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
@@ -43,8 +38,6 @@ impl Database {
         f(&conn)
     }
 
-    /// Run a closure against the read-only connection. Does not contend with
-    /// the write connection under WAL.
     pub fn with_read_conn<F, T>(&self, f: F) -> Result<T, rusqlite::Error>
     where
         F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
@@ -53,7 +46,6 @@ impl Database {
         f(&conn)
     }
 
-    /// Lock the write connection (for transactions needing `&mut Connection`).
     pub fn lock(&self) -> MutexGuard<'_, Connection> {
         self.write_conn.lock().unwrap_or_else(|e| e.into_inner())
     }

@@ -25,8 +25,8 @@ function getInitial(): SidebarState {
           typeof parsed.selectedFolderId === "number" ? parsed.selectedFolderId : null,
       };
     }
-  } catch {
-    /* */
+  } catch (e) {
+    console.error(e);
   }
   return { expandedCatalogIds: [], activeCatalogId: null, selectedFolderId: null };
 }
@@ -39,7 +39,7 @@ sidebarState.subscribe((value) => {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
-  } catch {
-    /* */
+  } catch (e) {
+    console.error(e);
   }
 });
