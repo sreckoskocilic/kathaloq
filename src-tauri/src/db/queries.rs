@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use rusqlite::{params, Connection};
 
 use crate::models::{Catalog, FileEntry, FolderStats, MediaTags};
@@ -113,6 +115,7 @@ pub fn delete_file_entries_by_ids(conn: &Connection, ids: &[i64]) -> rusqlite::R
 
 pub fn collect_descendant_ids(conn: &Connection, root_ids: &[i64]) -> rusqlite::Result<Vec<i64>> {
     let mut all_ids: Vec<i64> = root_ids.to_vec();
+    let mut seen: HashSet<i64> = root_ids.iter().copied().collect();
     let mut queue: Vec<i64> = root_ids.to_vec();
 
     while !queue.is_empty() {
@@ -125,8 +128,14 @@ pub fn collect_descendant_ids(conn: &Connection, root_ids: &[i64]) -> rusqlite::
             let children: Vec<i64> = stmt
                 .query_map(params![parent_id], |row| row.get(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            all_ids.extend(&children);
-            queue.extend(children);
+            // Guard against circular parent_id chains (corrupt data): only
+            // visit each id once, otherwise the walk loops forever / OOMs.
+            for child in children {
+                if seen.insert(child) {
+                    all_ids.push(child);
+                    queue.push(child);
+                }
+            }
         }
     }
     Ok(all_ids)

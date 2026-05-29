@@ -131,14 +131,13 @@
     if (!entry.is_dir || $activeCatalogId === null) return;
     $breadcrumbs = [...$breadcrumbs, { id: entry.id, name: entry.name }];
     $searchQuery = "";
-    loadChildren($activeCatalogId, entry.id, $mediaFilter);
+    // Mutating $breadcrumbs re-runs the reactive block (L86), which loads the
+    // children. Don't also call loadChildren here or it fires twice.
   }
 
   function handleGoUp() {
     if ($activeCatalogId === null || $breadcrumbs.length === 0) return;
     $breadcrumbs = $breadcrumbs.slice(0, -1);
-    const parentId = $breadcrumbs[$breadcrumbs.length - 1]?.id ?? null;
-    loadChildren($activeCatalogId, parentId, $mediaFilter);
   }
 
   let removeTargets: FileEntry[] = [];
@@ -172,8 +171,8 @@
     } else {
       const idx = $breadcrumbs.findIndex((b) => b.id === item.id);
       if (idx >= 0) {
+        // Reactive block (L86) reloads on the $breadcrumbs change.
         $breadcrumbs = $breadcrumbs.slice(0, idx + 1);
-        loadChildren($activeCatalogId, item.id, $mediaFilter);
       }
     }
   }

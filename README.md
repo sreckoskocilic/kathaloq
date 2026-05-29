@@ -9,6 +9,14 @@ Indexes folders (external drives, NAS mounts, whatever) into a local SQLite data
 
 Built with Tauri 2, Svelte 5, and Rust.
 
+## Features
+
+Beyond the basic index-and-search:
+
+- Filter to just audio or video. For media files it reads the tags too (duration, bitrate, sample rate, channels, artist, album, genre, year, track).
+- Plugged the drive back in and added stuff? Re-scan, and it shows you what changed (added, updated, removed) before it touches the database.
+- The status bar keeps a live count and total size for the folder you're in, or whatever you've selected.
+
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) v20+

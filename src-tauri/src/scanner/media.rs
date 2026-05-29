@@ -22,9 +22,9 @@ pub fn extract_and_store_tags(conn: &Connection, file_entry_id: i64, file_path: 
     let tagged_file = match Probe::open(file_path).and_then(|p| p.read()) {
         Ok(f) => f,
         Err(_) => {
-            let _ = insert_media_tags(
-                conn, file_entry_id, None, None, None, None, None, None, None, None, None, None,
-            );
+            // Don't persist a placeholder row on read failure: a NULL row would
+            // make get_media_tags() return Some, permanently masking the file
+            // from re-tagging once it becomes readable. Leave it untagged.
             return false;
         }
     };
