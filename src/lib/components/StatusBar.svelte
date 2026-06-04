@@ -1,14 +1,50 @@
 <script lang="ts">
-  import { activeCatalog, currentFiles } from "../stores/catalog";
+  import { afterUpdate } from "svelte";
+  import { activeCatalog, currentFiles, catalogVersion } from "../stores/catalog";
   import { theme } from "../stores/theme";
   import { formatSize } from "../services/format";
+  import * as api from "../services/tauri";
   import type { FileEntry } from "../types";
 
   export let selectedEntries: FileEntry[] = [];
 
   $: fileCount = $currentFiles.filter((f) => !f.is_dir).length;
   $: folderCount = $currentFiles.filter((f) => f.is_dir).length;
-  $: selectionSize = selectedEntries.reduce((sum, e) => sum + e.size, 0);
+
+  // Selection size must match PreviewPanel: a selected folder contributes its
+  // recursive contents (getBulkStats), not its own 0-byte row. afterUpdate +
+  // memo key mirrors PreviewPanel; catalogVersion busts it after a mutation.
+  let selectionSize = 0;
+  let lastKey = "";
+  let sizeGen = 0;
+
+  afterUpdate(() => {
+    const catalogId = $activeCatalog?.id ?? null;
+    const key =
+      selectedEntries.length > 1 && catalogId !== null
+        ? `${$catalogVersion}:${catalogId}:${selectedEntries.map((e) => e.id).join(",")}`
+        : "";
+    if (key === lastKey) return;
+    lastKey = key;
+    if (!key || catalogId === null) {
+      selectionSize = 0;
+      return;
+    }
+    loadSelectionSize(catalogId, selectedEntries);
+  });
+
+  async function loadSelectionSize(catalogId: number, entries: FileEntry[]) {
+    const gen = ++sizeGen;
+    try {
+      const stats = await api.getBulkStats(
+        catalogId,
+        entries.map((e) => e.id)
+      );
+      if (gen === sizeGen) selectionSize = stats.total_size;
+    } catch (e) {
+      console.error(e);
+    }
+  }
 </script>
 
 <footer class="status-bar">

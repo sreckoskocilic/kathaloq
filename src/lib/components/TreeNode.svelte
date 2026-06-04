@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { getChildren } from "../services/tauri";
+  import { catalogVersion } from "../stores/catalog";
   import type { FileEntry } from "../types";
 
   import type { BreadcrumbItem } from "../types";
@@ -14,14 +16,29 @@
   let children: FileEntry[] = [];
   let loaded = false;
 
+  // On a catalog mutation, drop the cached children. Refetch immediately if this
+  // node is expanded so the visible tree stays current; otherwise lazy-load on next open.
+  // Imperative subscription (not $:) so the async refetch isn't flagged as a reactive loop.
+  let lastVersion = $catalogVersion;
+  onMount(() =>
+    catalogVersion.subscribe((v) => {
+      if (v === lastVersion) return;
+      lastVersion = v;
+      loaded = false;
+      if (expanded) fetchChildren();
+    })
+  );
+
+  async function fetchChildren() {
+    children = (await getChildren(entry.catalog_id, entry.id))
+      .filter((e) => e.is_dir)
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    loaded = true;
+  }
+
   async function toggle() {
     if (!entry.is_dir) return;
-    if (!loaded) {
-      children = (await getChildren(entry.catalog_id, entry.id))
-        .filter((e) => e.is_dir)
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-      loaded = true;
-    }
+    if (!loaded) await fetchChildren();
     expanded = !expanded;
   }
 

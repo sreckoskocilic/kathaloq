@@ -1,16 +1,29 @@
 import { writable } from "svelte/store";
+import type { BreadcrumbItem } from "../types";
 
 const STORAGE_KEY = "kathaloq-sidebar";
 
 interface SidebarState {
   expandedCatalogIds: number[];
   activeCatalogId: number | null;
-  selectedFolderId: number | null;
+  // Full ancestor path of the selected folder (with names), so a reload restores
+  // the breadcrumb and up-navigation, not just a single nameless segment.
+  selectedFolderPath: BreadcrumbItem[];
+}
+
+const EMPTY: SidebarState = {
+  expandedCatalogIds: [],
+  activeCatalogId: null,
+  selectedFolderPath: [],
+};
+
+function isBreadcrumbPath(v: unknown): v is BreadcrumbItem[] {
+  return Array.isArray(v) && v.every((x) => x && typeof x === "object" && "id" in x && "name" in x);
 }
 
 function getInitial(): SidebarState {
   if (typeof window === "undefined") {
-    return { expandedCatalogIds: [], activeCatalogId: null, selectedFolderId: null };
+    return { ...EMPTY };
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -21,14 +34,15 @@ function getInitial(): SidebarState {
           ? parsed.expandedCatalogIds
           : [],
         activeCatalogId: typeof parsed.activeCatalogId === "number" ? parsed.activeCatalogId : null,
-        selectedFolderId:
-          typeof parsed.selectedFolderId === "number" ? parsed.selectedFolderId : null,
+        selectedFolderPath: isBreadcrumbPath(parsed.selectedFolderPath)
+          ? parsed.selectedFolderPath
+          : [],
       };
     }
   } catch (e) {
     console.error(e);
   }
-  return { expandedCatalogIds: [], activeCatalogId: null, selectedFolderId: null };
+  return { ...EMPTY };
 }
 
 const initial = getInitial();

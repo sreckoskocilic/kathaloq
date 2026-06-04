@@ -9,6 +9,7 @@
     getFileColor,
   } from "../services/format";
   import * as api from "../services/tauri";
+  import { catalogVersion } from "../stores/catalog";
   import type { FileEntry, FolderStats, MediaTags } from "../types";
 
   export let entries: FileEntry[];
@@ -25,8 +26,12 @@
   $: isMulti = entries.length > 1;
 
   afterUpdate(() => {
+    // Include catalogVersion so an in-place mutation (rescan/remove) busts the memo
+    // even when the same folder/selection stays selected (same ids). See M-6.
     const loadKey =
-      entries.length > 0 && catalogId ? `${catalogId}:${entries.map((e) => e.id).join(",")}` : "";
+      entries.length > 0 && catalogId
+        ? `${$catalogVersion}:${catalogId}:${entries.map((e) => e.id).join(",")}`
+        : "";
 
     if (loadKey === lastLoadKey) return;
     lastLoadKey = loadKey;

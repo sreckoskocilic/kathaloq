@@ -25,6 +25,8 @@
       sortField = field;
       sortDir = "asc";
     }
+    // Row order changed; a stale anchor would make the next shift-click select the wrong range.
+    lastClickedIndex = null;
   }
 
   $: visibleCols = $columns.filter((c) => c.visible);

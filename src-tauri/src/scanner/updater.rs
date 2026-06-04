@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 use crate::db::{
     delete_file_entries_by_ids, get_all_entries, get_media_tags, insert_file_entry,
-    update_catalog_scanned_at, update_catalog_stats, update_file_entry_metadata,
+    recalc_catalog_stats, update_catalog_scanned_at, update_file_entry_metadata,
 };
 use crate::models::{FileEntry, UpdatePreview};
 use crate::scanner::media::{extract_and_store_tags, is_media_file};
@@ -25,7 +25,11 @@ struct DiskEntry {
     extension: Option<String>,
 }
 
-fn walk_disk(root: &Path) -> Vec<DiskEntry> {
+// Returns Err if any directory or entry can't be read. Callers must NOT reconcile
+// a catalog against a partial walk: a transiently-unreadable subtree would look like
+// a mass deletion and silently drop those entries from the catalog. Aborting instead
+// leaves the catalog untouched (the surrounding transaction rolls back).
+fn walk_disk(root: &Path) -> Result<Vec<DiskEntry>, String> {
     let mut entries = Vec::new();
 
     for entry in WalkDir::new(root)
@@ -38,20 +42,16 @@ fn walk_disk(root: &Path) -> Vec<DiskEntry> {
             !should_skip(&e.file_name().to_string_lossy())
         })
     {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
+        let entry = entry.map_err(|e| format!("Cannot read directory during scan: {e}"))?;
         let path = entry.path();
 
         if path == root {
             continue;
         }
 
-        let metadata = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
+        let metadata = entry
+            .metadata()
+            .map_err(|e| format!("Cannot read metadata for {}: {e}", path.display()))?;
 
         let name = entry.file_name().to_string_lossy().to_string();
         let rel_path = path
@@ -84,7 +84,12 @@ fn walk_disk(root: &Path) -> Vec<DiskEntry> {
         });
     }
 
-    entries
+    Ok(entries)
+}
+
+// Tree depth of a stored relative path, used to delete children before parents.
+fn path_depth(path: &str) -> usize {
+    path.chars().filter(|&c| c == '/' || c == '\\').count()
 }
 
 pub fn preview_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<UpdatePreview, String> {
@@ -94,7 +99,7 @@ pub fn preview_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result
         db_map.insert(entry.path.clone(), entry);
     }
 
-    let disk_entries = walk_disk(root);
+    let disk_entries = walk_disk(root)?;
 
     let mut added: u64 = 0;
     let mut updated: u64 = 0;
@@ -158,7 +163,7 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
         db_map.insert(entry.path.clone(), entry);
     }
 
-    let disk_entries = walk_disk(root);
+    let disk_entries = walk_disk(root)?;
 
     let mut added: u64 = 0;
     let mut updated: u64 = 0;
@@ -237,7 +242,7 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
 
     let mut deleted_files: u64 = 0;
     let mut deleted_folders: u64 = 0;
-    let mut ids_to_delete: Vec<i64> = Vec::new();
+    let mut to_delete: Vec<&FileEntry> = Vec::new();
 
     for (path, entry) in &db_map {
         if !seen_paths.contains(path) {
@@ -246,17 +251,23 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
             } else {
                 deleted_files += 1;
             }
-            ids_to_delete.push(entry.id);
+            to_delete.push(entry);
         }
     }
+
+    // Order parents before children (by path depth); delete_file_entries_by_ids
+    // removes in reverse, so children go first — satisfying the self-referential
+    // parent_id FK without relying on a defer_foreign_keys pragma.
+    to_delete.sort_by_key(|e| path_depth(&e.path));
+    let ids_to_delete: Vec<i64> = to_delete.iter().map(|e| e.id).collect();
 
     if !ids_to_delete.is_empty() {
         delete_file_entries_by_ids(conn, &ids_to_delete).map_err(|e| e.to_string())?;
     }
 
-    let total_files = (unchanged + updated + added) - disk_entries.iter().filter(|e| e.is_dir).count() as u64;
-    let total_size: u64 = disk_entries.iter().filter(|e| !e.is_dir).map(|e| e.size).sum();
-    update_catalog_stats(conn, catalog_id, total_files, total_size).map_err(|e| e.to_string())?;
+    // Derive totals from the source-of-truth table, not the disk-walk tallies, so a
+    // mid-scan filesystem hiccup can never desync catalogs.total_* from the rows.
+    recalc_catalog_stats(conn, catalog_id).map_err(|e| e.to_string())?;
 
     let scanned_at = Utc::now().to_rfc3339();
     update_catalog_scanned_at(conn, catalog_id, &scanned_at).map_err(|e| e.to_string())?;

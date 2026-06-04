@@ -56,7 +56,6 @@ pub async fn apply_catalog_update(db: State<'_, Database>, catalog_id: i64) -> R
     tokio::task::spawn_blocking(move || {
         let mut conn = db.lock();
         let tx = conn.transaction().map_err(|e| e.to_string())?;
-        tx.execute_batch("PRAGMA defer_foreign_keys = ON").map_err(|e| e.to_string())?;
         let catalog = db::get_catalog_by_id(&tx, catalog_id).map_err(|e| e.to_string())?;
         let root = PathBuf::from(&catalog.root_path);
         if !root.is_dir() {

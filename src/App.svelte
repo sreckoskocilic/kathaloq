@@ -19,6 +19,7 @@
     searchQuery,
     mediaFilter,
     activeCatalog,
+    bumpCatalogVersion,
   } from "./lib/stores/catalog";
   import { theme } from "./lib/stores/theme";
   import * as api from "./lib/services/tauri";
@@ -48,6 +49,7 @@
     try {
       const id = await api.startScan(path, name);
       await loadCatalogs();
+      bumpCatalogVersion();
       navigateToFolder(id);
     } catch (e) {
       console.error("Scan failed:", e);
@@ -74,12 +76,17 @@
     if (!deleteTarget) return;
     const id = deleteTarget.id;
     deleteTarget = null;
-    await api.deleteCatalog(id);
-    await loadCatalogs();
-    if ($activeCatalogId === id) {
-      $activeCatalogId = null;
-      $currentFiles = [];
-      $breadcrumbs = [];
+    try {
+      await api.deleteCatalog(id);
+      await loadCatalogs();
+      bumpCatalogVersion();
+      if ($activeCatalogId === id) {
+        $activeCatalogId = null;
+        $currentFiles = [];
+        $breadcrumbs = [];
+      }
+    } catch (e) {
+      console.error("Failed to delete catalog:", e);
     }
   }
 
@@ -155,6 +162,7 @@
     try {
       await api.removeFileEntries(catalogId, ids);
       await loadCatalogs();
+      bumpCatalogVersion();
       const lastCrumb = $breadcrumbs[$breadcrumbs.length - 1];
       await loadChildren(catalogId, lastCrumb?.id ?? null, $mediaFilter);
     } catch (e) {
@@ -229,6 +237,7 @@
     onComplete={async () => {
       updateTarget = null;
       await loadCatalogs();
+      bumpCatalogVersion();
       if ($activeCatalogId !== null) {
         const lastCrumb = $breadcrumbs[$breadcrumbs.length - 1];
         await loadChildren($activeCatalogId, lastCrumb?.id ?? null, $mediaFilter);

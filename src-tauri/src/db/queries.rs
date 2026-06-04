@@ -22,7 +22,7 @@ pub fn update_catalog_stats(conn: &Connection, id: i64, total_files: u64, total_
 
 pub fn list_catalogs(conn: &Connection) -> rusqlite::Result<Vec<Catalog>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, root_path, scanned_at, total_files, total_size FROM catalogs ORDER BY scanned_at DESC",
+        "SELECT id, name, root_path, scanned_at, total_files, total_size FROM catalogs ORDER BY scanned_at DESC, id DESC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(Catalog {
@@ -334,8 +334,8 @@ pub fn get_children_filtered(
     media_type: &str,
 ) -> rusqlite::Result<Vec<FileEntry>> {
     let extensions: &[&str] = match media_type {
-        "audio" => &["mp3", "flac", "ogg", "opus", "wav", "aiff", "aif", "m4a", "m4b", "aac", "wma", "ape", "wv", "mpc"],
-        "video" => &["mp4", "m4v", "mov", "avi", "mkv", "wmv", "webm", "flv"],
+        "audio" => crate::scanner::media::AUDIO_EXTENSIONS,
+        "video" => crate::scanner::media::VIDEO_EXTENSIONS,
         _ => return get_children(conn, catalog_id, parent_id),
     };
 

@@ -7,14 +7,21 @@ use rusqlite::Connection;
 
 use crate::db::insert_media_tags;
 
-const MEDIA_EXTENSIONS: &[&str] = &[
-    "mp3", "flac", "ogg", "opus", "wav", "aiff", "aif", "m4a", "m4b", "aac", "wma", "ape",
-    "wv", "mpc", "mp4", "m4v", "mov",
+// Single source of truth for the media-filter extension sets. The audio/video
+// filters (db::get_children_filtered) and tag extraction (is_media_file) share
+// these so a format can never appear in a filter yet be ignored for tagging.
+pub const AUDIO_EXTENSIONS: &[&str] = &[
+    "mp3", "flac", "ogg", "opus", "wav", "aiff", "aif", "m4a", "m4b", "aac", "wma", "ape", "wv",
+    "mpc",
 ];
+pub const VIDEO_EXTENSIONS: &[&str] = &["mp4", "m4v", "mov", "avi", "mkv", "wmv", "webm", "flv"];
 
 pub fn is_media_file(extension: Option<&str>) -> bool {
     extension
-        .map(|e| MEDIA_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+        .map(|e| {
+            let e = e.to_lowercase();
+            AUDIO_EXTENSIONS.contains(&e.as_str()) || VIDEO_EXTENSIONS.contains(&e.as_str())
+        })
         .unwrap_or(false)
 }
 
@@ -84,6 +91,8 @@ mod tests {
         assert!(is_media_file(Some("MP3"))); // case-insensitive
         assert!(is_media_file(Some("flac")));
         assert!(is_media_file(Some("mp4")));
+        assert!(is_media_file(Some("mkv"))); // video set, shared with the video filter
+        assert!(is_media_file(Some("webm")));
     }
 
     #[test]
