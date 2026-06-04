@@ -148,89 +148,91 @@
       {/if}
 
       {#if entry.is_dir && folderStats}
+        {@const stats = folderStats}
         <div class="info-section">
           <div class="section-header">Contents</div>
           <div class="info-row">
             <span class="info-label">Files</span>
-            <span class="info-value">{folderStats.file_count.toLocaleString()}</span>
+            <span class="info-value">{stats?.file_count.toLocaleString()}</span>
           </div>
           <div class="info-row">
             <span class="info-label">Folders</span>
-            <span class="info-value">{folderStats.folder_count.toLocaleString()}</span>
+            <span class="info-value">{stats?.folder_count.toLocaleString()}</span>
           </div>
           <div class="info-row">
             <span class="info-label">Total size</span>
-            <span class="info-value">{formatSize(folderStats.total_size)}</span>
+            <span class="info-value">{formatSize(stats?.total_size)}</span>
           </div>
         </div>
       {/if}
 
       {#if !entry.is_dir && mediaTags}
+        {@const tags = mediaTags}
         <div class="info-section">
           <div class="section-header">Media</div>
-          {#if mediaTags.title}
+          {#if tags?.title}
             <div class="info-row">
               <span class="info-label">Title</span>
-              <span class="info-value">{mediaTags.title}</span>
+              <span class="info-value">{tags?.title}</span>
             </div>
           {/if}
-          {#if mediaTags.artist}
+          {#if tags?.artist}
             <div class="info-row">
               <span class="info-label">Artist</span>
-              <span class="info-value">{mediaTags.artist}</span>
+              <span class="info-value">{tags?.artist}</span>
             </div>
           {/if}
-          {#if mediaTags.album}
+          {#if tags?.album}
             <div class="info-row">
               <span class="info-label">Album</span>
-              <span class="info-value">{mediaTags.album}</span>
+              <span class="info-value">{tags?.album}</span>
             </div>
           {/if}
-          {#if mediaTags.genre}
+          {#if tags?.genre}
             <div class="info-row">
               <span class="info-label">Genre</span>
-              <span class="info-value">{mediaTags.genre}</span>
+              <span class="info-value">{tags?.genre}</span>
             </div>
           {/if}
-          {#if mediaTags.year}
+          {#if tags?.year}
             <div class="info-row">
               <span class="info-label">Year</span>
-              <span class="info-value">{mediaTags.year}</span>
+              <span class="info-value">{tags?.year}</span>
             </div>
           {/if}
-          {#if mediaTags.track_number}
+          {#if tags?.track_number}
             <div class="info-row">
               <span class="info-label">Track</span>
-              <span class="info-value">{mediaTags.track_number}</span>
+              <span class="info-value">{tags?.track_number}</span>
             </div>
           {/if}
-          {#if mediaTags.duration_secs}
+          {#if tags?.duration_secs}
             <div class="info-row">
               <span class="info-label">Duration</span>
-              <span class="info-value">{formatDuration(mediaTags.duration_secs)}</span>
+              <span class="info-value">{formatDuration(tags?.duration_secs)}</span>
             </div>
           {/if}
-          {#if mediaTags.bitrate}
+          {#if tags?.bitrate}
             <div class="info-row">
               <span class="info-label">Bitrate</span>
-              <span class="info-value">{formatBitrate(mediaTags.bitrate)}</span>
+              <span class="info-value">{formatBitrate(tags?.bitrate)}</span>
             </div>
           {/if}
-          {#if mediaTags.sample_rate}
+          {#if tags?.sample_rate}
             <div class="info-row">
               <span class="info-label">Sample rate</span>
-              <span class="info-value">{formatSampleRate(mediaTags.sample_rate)}</span>
+              <span class="info-value">{formatSampleRate(tags?.sample_rate)}</span>
             </div>
           {/if}
-          {#if mediaTags.channels}
+          {#if tags?.channels}
             <div class="info-row">
               <span class="info-label">Channels</span>
               <span class="info-value"
-                >{mediaTags.channels === 1
+                >{tags?.channels === 1
                   ? "Mono"
-                  : mediaTags.channels === 2
+                  : tags?.channels === 2
                     ? "Stereo"
-                    : String(mediaTags.channels)}</span
+                    : String(tags?.channels)}</span
               >
             </div>
           {/if}
@@ -280,21 +282,22 @@
           <span class="loading-text">Loading...</span>
         </div>
       {:else if folderStats}
+        {@const stats = folderStats}
         <div class="info-section">
           <div class="section-header">Total contents</div>
           <div class="info-row">
             <span class="info-label">All files</span>
-            <span class="info-value">{folderStats.file_count.toLocaleString()}</span>
+            <span class="info-value">{stats?.file_count.toLocaleString()}</span>
           </div>
-          {#if folderStats.folder_count > 0}
+          {#if stats?.folder_count > 0}
             <div class="info-row">
               <span class="info-label">All folders</span>
-              <span class="info-value">{folderStats.folder_count.toLocaleString()}</span>
+              <span class="info-value">{stats?.folder_count.toLocaleString()}</span>
             </div>
           {/if}
           <div class="info-row">
             <span class="info-label">Total size</span>
-            <span class="info-value">{formatSize(folderStats.total_size)}</span>
+            <span class="info-value">{formatSize(stats?.total_size)}</span>
           </div>
         </div>
       {/if}

@@ -133,6 +133,19 @@
     contextMenu = null;
   }
 
+  function handleWindowKeydown(e: KeyboardEvent) {
+    if ((e.metaKey || e.ctrlKey) && (e.key === "a" || e.key === "A")) {
+      // Don't hijack select-all while typing in the search box or any input.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (sortedFiles.length === 0) return;
+      e.preventDefault();
+      selectedIds = new SvelteSet(sortedFiles.map((f) => f.id));
+      lastClickedIndex = sortedFiles.length - 1;
+      notifySelection();
+    }
+  }
+
   function handleListClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (target.closest(".row")) return;
@@ -287,6 +300,7 @@
   on:contextmenu={() => {
     if (contextMenu) closeContextMenu();
   }}
+  on:keydown={handleWindowKeydown}
 />
 
 {#if contextMenu}
