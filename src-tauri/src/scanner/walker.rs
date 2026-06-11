@@ -84,7 +84,7 @@ pub fn scan_directory(conn: &Connection, catalog_id: i64, root: &Path) -> Result
             total_size += size;
 
             if is_media_file(extension.as_deref()) {
-                let _ = extract_and_store_tags(conn, entry_id, path);
+                extract_and_store_tags(conn, entry_id, path)?;
             }
         }
     }

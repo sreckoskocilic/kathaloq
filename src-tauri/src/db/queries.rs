@@ -1,8 +1,9 @@
-use std::collections::HashSet;
-
 use rusqlite::{params, Connection};
 
 use crate::models::{Catalog, FileEntry, FolderStats, MediaTags};
+
+/// Depth cap for the recursive tree CTEs: bounds runaway depth and ends cycles.
+const MAX_TREE_DEPTH: u32 = 100;
 
 pub fn insert_catalog(conn: &Connection, name: &str, root_path: &str, scanned_at: &str) -> rusqlite::Result<i64> {
     conn.execute(
@@ -54,11 +55,12 @@ pub fn insert_file_entry(
     modified: Option<&str>,
     extension: Option<&str>,
 ) -> rusqlite::Result<i64> {
-    conn.execute(
+    // Cached stmt: per-file scan hot path, skip re-parsing the INSERT each file.
+    conn.prepare_cached(
         "INSERT INTO file_entries (catalog_id, parent_id, name, path, is_dir, size, modified, extension)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![catalog_id, parent_id, name, path, is_dir as i32, size, modified, extension],
-    )?;
+    )?
+    .execute(params![catalog_id, parent_id, name, path, is_dir as i32, size, modified, extension])?;
     Ok(conn.last_insert_rowid())
 }
 
@@ -114,29 +116,31 @@ pub fn delete_file_entries_by_ids(conn: &Connection, ids: &[i64]) -> rusqlite::R
 }
 
 pub fn collect_descendant_ids(conn: &Connection, root_ids: &[i64]) -> rusqlite::Result<Vec<i64>> {
-    let mut all_ids: Vec<i64> = root_ids.to_vec();
-    let mut seen: HashSet<i64> = root_ids.iter().copied().collect();
-    let mut queue: Vec<i64> = root_ids.to_vec();
-
-    while !queue.is_empty() {
-        let current = queue.clone();
-        queue.clear();
-        for parent_id in current {
-            let mut stmt = conn.prepare(
-                "SELECT id FROM file_entries WHERE parent_id = ?1",
-            )?;
-            let children: Vec<i64> = stmt
-                .query_map(params![parent_id], |row| row.get(0))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            for child in children {
-                if seen.insert(child) {
-                    all_ids.push(child);
-                    queue.push(child);
-                }
-            }
-        }
+    if root_ids.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(all_ids)
+    // One CTE, not a query per node. UNION + depth cap stop cycles; parents sort
+    // before children so a reversed delete stays FK-safe.
+    let placeholders: String = (0..root_ids.len())
+        .map(|i| format!("?{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "WITH RECURSIVE descendants(id, depth) AS (
+            SELECT id, 0 FROM file_entries WHERE id IN ({placeholders})
+            UNION
+            SELECT fe.id, d.depth + 1 FROM file_entries fe
+            JOIN descendants d ON fe.parent_id = d.id
+            WHERE d.depth < {MAX_TREE_DEPTH}
+        )
+        SELECT id FROM descendants GROUP BY id ORDER BY MIN(depth)",
+        MAX_TREE_DEPTH = MAX_TREE_DEPTH,
+    );
+    let params: Vec<&dyn rusqlite::ToSql> =
+        root_ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params.as_slice(), |row| row.get(0))?;
+    rows.collect()
 }
 
 pub fn recalc_catalog_stats(conn: &Connection, catalog_id: i64) -> rusqlite::Result<()> {
@@ -154,10 +158,8 @@ pub fn update_file_entry_metadata(
     size: u64,
     modified: Option<&str>,
 ) -> rusqlite::Result<()> {
-    conn.execute(
-        "UPDATE file_entries SET size = ?1, modified = ?2 WHERE id = ?3",
-        params![size, modified, id],
-    )?;
+    conn.prepare_cached("UPDATE file_entries SET size = ?1, modified = ?2 WHERE id = ?3")?
+        .execute(params![size, modified, id])?;
     Ok(())
 }
 
@@ -187,27 +189,24 @@ pub fn get_catalog_by_id(conn: &Connection, id: i64) -> rusqlite::Result<Catalog
 }
 
 pub fn get_folder_stats(conn: &Connection, catalog_id: i64, folder_id: i64) -> rusqlite::Result<FolderStats> {
-    let all_ids = collect_descendant_ids(conn, &[folder_id])?;
-    let mut file_count: u64 = 0;
-    let mut folder_count: u64 = 0;
-    let mut total_size: u64 = 0;
-
-    for id in &all_ids {
-        if *id == folder_id {
-            continue;
-        }
-        let (is_dir, size): (bool, u64) = conn.query_row(
-            "SELECT is_dir, size FROM file_entries WHERE id = ?1 AND catalog_id = ?2",
-            params![id, catalog_id],
-            |row| Ok((row.get::<_, i32>(0)? != 0, row.get(1)?)),
-        )?;
-        if is_dir {
-            folder_count += 1;
-        } else {
-            file_count += 1;
-            total_size += size;
-        }
-    }
+    // SUM over descendants in one CTE, not id-collect + a query_row per row (old N+1).
+    let (file_count, folder_count, total_size): (u64, u64, u64) = conn.query_row(
+        "WITH RECURSIVE descendants(id, depth) AS (
+            SELECT id, 0 FROM file_entries WHERE id = ?1 AND catalog_id = ?2
+            UNION
+            SELECT fe.id, d.depth + 1 FROM file_entries fe
+            JOIN descendants d ON fe.parent_id = d.id
+            WHERE fe.catalog_id = ?2 AND d.depth < ?3
+        )
+        SELECT
+            COALESCE(SUM(CASE WHEN fe.is_dir = 0 THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN fe.is_dir = 1 THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN fe.is_dir = 0 THEN fe.size ELSE 0 END), 0)
+         FROM file_entries fe
+         WHERE fe.id IN (SELECT id FROM descendants WHERE id != ?1)",
+        params![folder_id, catalog_id, MAX_TREE_DEPTH],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
 
     Ok(FolderStats {
         file_count,
@@ -217,47 +216,52 @@ pub fn get_folder_stats(conn: &Connection, catalog_id: i64, folder_id: i64) -> r
 }
 
 pub fn get_bulk_stats(conn: &Connection, catalog_id: i64, ids: &[i64]) -> rusqlite::Result<FolderStats> {
-    // Build the set of entries the selection covers: each selected file counts
-    // itself; each selected folder contributes its descendants (recursively),
-    // excluding the folder node itself. Overlaps are de-duplicated.
-    let mut to_count: Vec<i64> = Vec::new();
-    for &id in ids {
-        let is_dir: bool = conn.query_row(
-            "SELECT is_dir FROM file_entries WHERE id = ?1 AND catalog_id = ?2",
-            params![id, catalog_id],
-            |row| Ok(row.get::<_, i32>(0)? != 0),
-        )?;
-        if is_dir {
-            for d in collect_descendant_ids(conn, &[id])? {
-                if d != id {
-                    to_count.push(d);
-                }
-            }
-        } else {
-            to_count.push(id);
-        }
+    // Coverage set: a selected file counts itself, a selected folder its descendants
+    // (not itself), overlaps de-dup. One CTE, not the old per-id query loops.
+    if ids.is_empty() {
+        return Ok(FolderStats { file_count: 0, folder_count: 0, total_size: 0 });
     }
+    let placeholders: String = (0..ids.len())
+        .map(|i| format!("?{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let cat_param = ids.len() + 1;
+    let depth_param = ids.len() + 2;
+    let sql = format!(
+        "WITH RECURSIVE
+           seeds(id, is_dir) AS (
+             SELECT id, is_dir FROM file_entries WHERE id IN ({placeholders}) AND catalog_id = ?{cat_param}
+           ),
+           covered(id, depth) AS (
+             SELECT id, 0 FROM (
+               -- selected files count themselves; selected folders start at their children
+               SELECT id FROM seeds WHERE is_dir = 0
+               UNION
+               SELECT fe.id FROM file_entries fe JOIN seeds s ON fe.parent_id = s.id
+                 WHERE s.is_dir = 1 AND fe.catalog_id = ?{cat_param}
+             )
+             UNION
+             SELECT fe.id, c.depth + 1 FROM file_entries fe JOIN covered c ON fe.parent_id = c.id
+               WHERE fe.catalog_id = ?{cat_param} AND c.depth < ?{depth_param}
+           )
+         SELECT
+            COALESCE(SUM(CASE WHEN fe.is_dir = 0 THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN fe.is_dir = 1 THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN fe.is_dir = 0 THEN fe.size ELSE 0 END), 0)
+         FROM file_entries fe
+         WHERE fe.id IN (SELECT id FROM covered)"
+    );
 
-    let mut file_count: u64 = 0;
-    let mut folder_count: u64 = 0;
-    let mut total_size: u64 = 0;
-    let mut counted: HashSet<i64> = HashSet::new();
-    for id in to_count {
-        if !counted.insert(id) {
-            continue;
-        }
-        let (is_dir, size): (bool, u64) = conn.query_row(
-            "SELECT is_dir, size FROM file_entries WHERE id = ?1 AND catalog_id = ?2",
-            params![id, catalog_id],
-            |row| Ok((row.get::<_, i32>(0)? != 0, row.get(1)?)),
-        )?;
-        if is_dir {
-            folder_count += 1;
-        } else {
-            file_count += 1;
-            total_size += size;
-        }
-    }
+    let depth = MAX_TREE_DEPTH;
+    let mut params: Vec<&dyn rusqlite::ToSql> =
+        ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+    params.push(&catalog_id);
+    params.push(&depth);
+
+    let (file_count, folder_count, total_size): (u64, u64, u64) =
+        conn.query_row(&sql, params.as_slice(), |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
 
     Ok(FolderStats {
         file_count,
@@ -281,11 +285,11 @@ pub fn insert_media_tags(
     year: Option<u32>,
     track_number: Option<u32>,
 ) -> rusqlite::Result<i64> {
-    conn.execute(
+    conn.prepare_cached(
         "INSERT OR REPLACE INTO media_tags (file_entry_id, duration_secs, bitrate, sample_rate, channels, title, artist, album, genre, year, track_number)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        params![file_entry_id, duration_secs, bitrate, sample_rate, channels, title, artist, album, genre, year, track_number],
-    )?;
+    )?
+    .execute(params![file_entry_id, duration_secs, bitrate, sample_rate, channels, title, artist, album, genre, year, track_number])?;
     Ok(conn.last_insert_rowid())
 }
 
@@ -318,13 +322,38 @@ pub fn get_media_tags(conn: &Connection, file_entry_id: i64) -> rusqlite::Result
 }
 
 pub fn get_media_tags_bulk(conn: &Connection, file_entry_ids: &[i64]) -> rusqlite::Result<Vec<MediaTags>> {
-    let mut result = Vec::new();
-    for &id in file_entry_ids {
-        if let Some(tags) = get_media_tags(conn, id)? {
-            result.push(tags);
-        }
+    if file_entry_ids.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(result)
+    // One IN(...) query, not one per id.
+    let placeholders: String = (0..file_entry_ids.len())
+        .map(|i| format!("?{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT id, file_entry_id, duration_secs, bitrate, sample_rate, channels, title, artist, album, genre, year, track_number
+         FROM media_tags WHERE file_entry_id IN ({placeholders})"
+    );
+    let params: Vec<&dyn rusqlite::ToSql> =
+        file_entry_ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params.as_slice(), |row| {
+        Ok(MediaTags {
+            id: row.get(0)?,
+            file_entry_id: row.get(1)?,
+            duration_secs: row.get(2)?,
+            bitrate: row.get(3)?,
+            sample_rate: row.get(4)?,
+            channels: row.get(5)?,
+            title: row.get(6)?,
+            artist: row.get(7)?,
+            album: row.get(8)?,
+            genre: row.get(9)?,
+            year: row.get(10)?,
+            track_number: row.get(11)?,
+        })
+    })?;
+    rows.collect()
 }
 
 pub fn get_children_filtered(
@@ -360,7 +389,7 @@ pub fn get_children_filtered(
             UNION
             SELECT fe2.parent_id, a.depth + 1 FROM file_entries fe2
             INNER JOIN ancestors a ON fe2.id = a.id
-            WHERE fe2.parent_id IS NOT NULL AND fe2.catalog_id = ?1 AND a.depth < 100
+            WHERE fe2.parent_id IS NOT NULL AND fe2.catalog_id = ?1 AND a.depth < {MAX_TREE_DEPTH}
         )
         SELECT fe.id, fe.catalog_id, fe.parent_id, fe.name, fe.path, fe.is_dir, fe.size, fe.modified, fe.extension
         FROM file_entries fe
@@ -442,15 +471,14 @@ mod tests {
         assert_eq!(ids, expected);
     }
 
-    // Regression for the M1 fix: a circular parent_id chain must terminate
-    // (without the visited-set guard this loops forever / OOMs).
+    // Circular parent_id chain must terminate (M1 regression: used to loop forever).
     #[test]
     fn collect_descendant_ids_terminates_on_cycle() {
         let c = conn();
         let cat = catalog(&c);
         let a = dir(&c, cat, None, "a");
         let b = dir(&c, cat, Some(a), "a/b");
-        // Make it circular: a.parent = b, b.parent = a.
+        // Make it circular: a↔b.
         c.execute("UPDATE file_entries SET parent_id = ?1 WHERE id = ?2", params![b, a])
             .unwrap();
 
@@ -461,7 +489,7 @@ mod tests {
         assert_eq!(ids, expected, "each id visited exactly once");
     }
 
-    // rev() delete order must satisfy the parent_id FK (children before parents).
+    // rev() delete must hit children before parents (parent_id FK).
     #[test]
     fn delete_file_entries_by_ids_respects_parent_fk() {
         let c = conn();
@@ -545,6 +573,34 @@ mod tests {
     }
 
     #[test]
+    fn get_children_filtered_surfaces_deep_media_ancestors() {
+        // Media 3+ levels deep: ancestor CTE must surface intermediate dirs, skip media-less ones.
+        let c = conn();
+        let cat = catalog(&c);
+        let music = dir(&c, cat, None, "music");
+        let year = dir(&c, cat, Some(music), "music/2020");
+        file(&c, cat, Some(year), "music/2020/song.mp3", 1, "mp3");
+        let docs = dir(&c, cat, None, "docs");
+        file(&c, cat, Some(docs), "docs/readme.txt", 1, "txt");
+
+        // At root: only `music` (ancestor of the deep mp3); `docs` has no media.
+        let root: Vec<String> = get_children_filtered(&c, cat, None, "audio")
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(root, vec!["music"], "deep-media ancestor kept, non-media dir dropped");
+
+        // One level down: the intermediate `music/2020` dir is surfaced.
+        let inside: Vec<String> = get_children_filtered(&c, cat, Some(music), "audio")
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(inside, vec!["music/2020"]);
+    }
+
+    #[test]
     fn search_files_escapes_like_wildcards() {
         let c = conn();
         let cat = catalog(&c);
@@ -566,6 +622,22 @@ mod tests {
         let cat2 = insert_catalog(&c, "other", "/o", "2026-01-01T00:00:00Z").unwrap();
         file(&c, cat2, None, "secret.txt", 1, "txt");
         assert!(search_files(&c, cat1, "secret").unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_files_escapes_underscore_wildcard() {
+        // `_` is a LIKE wildcard; escape it so "a_b" doesn't match "axb".
+        let c = conn();
+        let cat = catalog(&c);
+        file(&c, cat, None, "a_b.txt", 1, "txt");
+        file(&c, cat, None, "axb.txt", 1, "txt");
+
+        let hits: Vec<String> = search_files(&c, cat, "a_b")
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(hits, vec!["a_b.txt"], "_ is a literal, not a single-char wildcard");
     }
 
     #[test]

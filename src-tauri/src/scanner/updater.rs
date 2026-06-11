@@ -25,10 +25,8 @@ struct DiskEntry {
     extension: Option<String>,
 }
 
-// Returns Err if any directory or entry can't be read. Callers must NOT reconcile
-// a catalog against a partial walk: a transiently-unreadable subtree would look like
-// a mass deletion and silently drop those entries from the catalog. Aborting instead
-// leaves the catalog untouched (the surrounding transaction rolls back).
+// Err on any unreadable entry — never reconcile against a partial walk, or a
+// transiently-unreadable subtree reads as a mass delete. Err rolls back the tx.
 fn walk_disk(root: &Path) -> Result<Vec<DiskEntry>, String> {
     let mut entries = Vec::new();
 
@@ -197,7 +195,7 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
                     )
                     .map_err(|e| e.to_string())?;
                     if is_media_file(disk.extension.as_deref())
-                        && extract_and_store_tags(conn, db_entry.id, &disk.full_path)
+                        && extract_and_store_tags(conn, db_entry.id, &disk.full_path)?
                     {
                         tags_backfilled += 1;
                     }
@@ -208,7 +206,7 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
                             .map(|t| t.is_some())
                             .unwrap_or(false);
                         if !has_tags
-                            && extract_and_store_tags(conn, db_entry.id, &disk.full_path)
+                            && extract_and_store_tags(conn, db_entry.id, &disk.full_path)?
                         {
                             tags_backfilled += 1;
                         }
@@ -231,7 +229,7 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
                 .map_err(|e| e.to_string())?;
                 path_to_id.insert(disk.rel_path.clone(), entry_id);
                 if !disk.is_dir && is_media_file(disk.extension.as_deref())
-                    && extract_and_store_tags(conn, entry_id, &disk.full_path)
+                    && extract_and_store_tags(conn, entry_id, &disk.full_path)?
                 {
                     tags_backfilled += 1;
                 }
@@ -255,9 +253,8 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
         }
     }
 
-    // Order parents before children (by path depth); delete_file_entries_by_ids
-    // removes in reverse, so children go first — satisfying the self-referential
-    // parent_id FK without relying on a defer_foreign_keys pragma.
+    // Sort parents before children; delete removes in reverse (children first),
+    // so the parent_id FK holds without defer_foreign_keys.
     to_delete.sort_by_key(|e| path_depth(&e.path));
     let ids_to_delete: Vec<i64> = to_delete.iter().map(|e| e.id).collect();
 
@@ -265,8 +262,8 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
         delete_file_entries_by_ids(conn, &ids_to_delete).map_err(|e| e.to_string())?;
     }
 
-    // Derive totals from the source-of-truth table, not the disk-walk tallies, so a
-    // mid-scan filesystem hiccup can never desync catalogs.total_* from the rows.
+    // Totals from the rows, not the disk-walk tally, so a mid-scan hiccup can't
+    // desync catalogs.total_*.
     recalc_catalog_stats(conn, catalog_id).map_err(|e| e.to_string())?;
 
     let scanned_at = Utc::now().to_rfc3339();
@@ -383,6 +380,92 @@ mod tests {
 
         let cat_row = get_catalog_by_id(&c, cat).unwrap();
         assert_eq!(cat_row.total_files, 3, "keep, change, new");
+    }
+
+    #[test]
+    fn apply_update_deletes_nested_subtree_without_fk_violation() {
+        // Whole subtree vanishes: children must delete before parents (parent_id FK).
+        let tmp = TempDir::new("subtree");
+        write(&tmp.path, "root.txt", b"R");
+        write(&tmp.path, "a/b/c.txt", b"C");
+        write(&tmp.path, "a/b/d.txt", b"D");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+        assert_eq!(
+            get_all_entries(&c, cat).unwrap().len(),
+            5,
+            "root.txt, a, a/b, a/b/c.txt, a/b/d.txt"
+        );
+
+        // Remove the entire `a` subtree, keep the root sibling.
+        std::fs::remove_dir_all(tmp.path.join("a")).unwrap();
+
+        let preview = apply_update(&c, cat, &tmp.path).unwrap();
+        assert_eq!(preview.deleted_folders, 2, "a + a/b");
+        assert_eq!(preview.deleted_files, 2, "c.txt + d.txt");
+        assert_eq!(preview.unchanged, 1, "root.txt");
+        assert_eq!(preview.added, 0);
+
+        let entries = get_all_entries(&c, cat).unwrap();
+        assert_eq!(entries.len(), 1, "only root.txt survives");
+        assert_eq!(entries[0].name, "root.txt");
+
+        let cat_row = get_catalog_by_id(&c, cat).unwrap();
+        assert_eq!(cat_row.total_files, 1);
+    }
+
+    #[test]
+    fn apply_update_handles_dir_rename_as_delete_add_with_reparent() {
+        // Dir rename = delete old tree + add new; child must re-parent under the new dir.
+        let tmp = TempDir::new("rename");
+        write(&tmp.path, "old/file.txt", b"X");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+        assert_eq!(get_all_entries(&c, cat).unwrap().len(), 2, "old, old/file.txt");
+
+        std::fs::rename(tmp.path.join("old"), tmp.path.join("new")).unwrap();
+
+        let preview = apply_update(&c, cat, &tmp.path).unwrap();
+        assert_eq!(preview.added, 2, "new dir + new/file.txt");
+        assert_eq!(preview.deleted_folders, 1, "old");
+        assert_eq!(preview.deleted_files, 1, "old/file.txt");
+
+        let entries = get_all_entries(&c, cat).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|e| !e.path.starts_with("old")), "old path gone");
+        let new_dir = entries.iter().find(|e| e.name == "new").unwrap();
+        let child = entries.iter().find(|e| e.name == "file.txt").unwrap();
+        assert_eq!(child.parent_id, Some(new_dir.id), "child re-parented under new dir");
+    }
+
+    #[test]
+    fn apply_update_is_idempotent_on_unchanged_tree() {
+        // A re-scan with no disk changes must produce zero churn and stable rows/stats.
+        let tmp = TempDir::new("idempotent");
+        write(&tmp.path, "root.txt", b"R");
+        write(&tmp.path, "sub/a.txt", b"AB");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+        let before = get_all_entries(&c, cat).unwrap().len();
+        let stats_before = get_catalog_by_id(&c, cat).unwrap();
+
+        let preview = apply_update(&c, cat, &tmp.path).unwrap();
+        assert_eq!(preview.added, 0);
+        assert_eq!(preview.updated, 0);
+        assert_eq!(preview.deleted_files, 0);
+        assert_eq!(preview.deleted_folders, 0);
+        assert_eq!(preview.unchanged, before as u64, "every entry unchanged");
+
+        let stats_after = get_catalog_by_id(&c, cat).unwrap();
+        assert_eq!(get_all_entries(&c, cat).unwrap().len(), before, "row count stable");
+        assert_eq!(stats_after.total_files, stats_before.total_files);
+        assert_eq!(stats_after.total_size, stats_before.total_size);
     }
 
     #[test]

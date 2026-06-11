@@ -16,9 +16,8 @@
   let children: FileEntry[] = [];
   let loaded = false;
 
-  // On a catalog mutation, drop the cached children. Refetch immediately if this
-  // node is expanded so the visible tree stays current; otherwise lazy-load on next open.
-  // Imperative subscription (not $:) so the async refetch isn't flagged as a reactive loop.
+  // On catalog mutation drop cached children; refetch now if expanded, else lazy.
+  // Imperative (not $:) so the async refetch isn't flagged a reactive loop.
   let lastVersion = $catalogVersion;
   onMount(() =>
     catalogVersion.subscribe((v) => {

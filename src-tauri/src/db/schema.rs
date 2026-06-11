@@ -27,9 +27,14 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         );
 
         CREATE INDEX IF NOT EXISTS idx_entries_catalog ON file_entries(catalog_id);
+        -- For raw parent_id joins (descendant walks don't filter by catalog).
         CREATE INDEX IF NOT EXISTS idx_entries_parent ON file_entries(parent_id);
         CREATE INDEX IF NOT EXISTS idx_entries_name ON file_entries(name);
         CREATE INDEX IF NOT EXISTS idx_entries_extension ON file_entries(extension);
+        -- get_children: catalog_id + parent_id folder open.
+        CREATE INDEX IF NOT EXISTS idx_entries_cat_parent ON file_entries(catalog_id, parent_id);
+        -- get_children_filtered matches LOWER(extension); raw index can't serve that.
+        CREATE INDEX IF NOT EXISTS idx_entries_cat_ext_lower ON file_entries(catalog_id, LOWER(extension));
 
         CREATE TABLE IF NOT EXISTS media_tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

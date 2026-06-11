@@ -11,9 +11,8 @@
   $: fileCount = $currentFiles.filter((f) => !f.is_dir).length;
   $: folderCount = $currentFiles.filter((f) => f.is_dir).length;
 
-  // Selection size must match PreviewPanel: a selected folder contributes its
-  // recursive contents (getBulkStats), not its own 0-byte row. afterUpdate +
-  // memo key mirrors PreviewPanel; catalogVersion busts it after a mutation.
+  // Mirrors PreviewPanel: a folder counts its recursive contents (getBulkStats),
+  // not its 0-byte row. catalogVersion busts the memo after a mutation.
   let selectionSize = 0;
   let lastKey = "";
   let sizeGen = 0;

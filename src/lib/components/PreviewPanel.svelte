@@ -26,8 +26,7 @@
   $: isMulti = entries.length > 1;
 
   afterUpdate(() => {
-    // Include catalogVersion so an in-place mutation (rescan/remove) busts the memo
-    // even when the same folder/selection stays selected (same ids). See M-6.
+    // catalogVersion in the key so a rescan/remove busts the memo even if the same ids stay selected (M-6).
     const loadKey =
       entries.length > 0 && catalogId
         ? `${$catalogVersion}:${catalogId}:${entries.map((e) => e.id).join(",")}`

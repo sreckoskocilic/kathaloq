@@ -37,18 +37,6 @@ export interface ColumnConfig {
   width: string;
 }
 
-export interface TreeNode {
-  entry: FileEntry;
-  children: TreeNode[];
-  expanded: boolean;
-  loaded: boolean;
-}
-
-export interface AppSettings {
-  columns: ColumnConfig[];
-  theme: Theme;
-}
-
 export interface MediaTags {
   id: number;
   file_entry_id: number;

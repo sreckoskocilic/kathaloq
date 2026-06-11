@@ -19,6 +19,11 @@ describe("formatSize", () => {
     expect(formatSize(1048576)).toBe("1.0 MB");
   });
 
+  it("handles unit-boundary seams", () => {
+    expect(formatSize(1023)).toBe("1023 B"); // just under 1 KB stays in bytes
+    expect(formatSize(1048575)).toBe("1024.0 KB"); // just under 1 MB stays in KB
+  });
+
   it("formats gigabytes", () => {
     expect(formatSize(1073741824)).toBe("1.0 GB");
   });

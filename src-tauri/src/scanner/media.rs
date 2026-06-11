@@ -25,11 +25,17 @@ pub fn is_media_file(extension: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
-pub fn extract_and_store_tags(conn: &Connection, file_entry_id: i64, file_path: &Path) -> bool {
+/// `Ok(true)` stored, `Ok(false)` unparseable (no tags — not an error), `Err` only on a
+/// DB failure so the caller's scan tx aborts instead of committing a tagless row.
+pub fn extract_and_store_tags(
+    conn: &Connection,
+    file_entry_id: i64,
+    file_path: &Path,
+) -> Result<bool, String> {
     let tagged_file = match Probe::open(file_path).and_then(|p| p.read()) {
         Ok(f) => f,
         Err(_) => {
-            return false;
+            return Ok(false);
         }
     };
 
@@ -73,11 +79,8 @@ pub fn extract_and_store_tags(conn: &Connection, file_entry_id: i64, file_path: 
         year,
         track_number,
     ) {
-        Ok(_) => true,
-        Err(e) => {
-            eprintln!("db: failed to insert media tags for {:?}: {}", file_path, e);
-            false
-        }
+        Ok(_) => Ok(true),
+        Err(e) => Err(format!("failed to insert media tags for {file_path:?}: {e}")),
     }
 }
 

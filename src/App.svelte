@@ -148,7 +148,6 @@
   let removeTargets: FileEntry[] = [];
   let infoTargets: FileEntry[] = [];
   let selectedEntries: FileEntry[] = [];
-  let showPreview = true;
 
   function handleRemoveEntries(entries: FileEntry[]) {
     removeTargets = entries;
@@ -201,7 +200,7 @@
         onGetInfo={(entries) => (infoTargets = entries)}
         onSelectionChange={(entries) => (selectedEntries = entries)}
       />
-      {#if showPreview && $activeCatalogId !== null}
+      {#if $activeCatalogId !== null}
         <PreviewPanel entries={selectedEntries} catalogId={$activeCatalogId} />
       {/if}
     </div>

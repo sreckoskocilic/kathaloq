@@ -6,8 +6,7 @@ const STORAGE_KEY = "kathaloq-sidebar";
 interface SidebarState {
   expandedCatalogIds: number[];
   activeCatalogId: number | null;
-  // Full ancestor path of the selected folder (with names), so a reload restores
-  // the breadcrumb and up-navigation, not just a single nameless segment.
+  // Full ancestor path so a reload restores breadcrumb + up-nav, not one segment.
   selectedFolderPath: BreadcrumbItem[];
 }
 

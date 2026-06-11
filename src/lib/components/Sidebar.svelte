@@ -46,8 +46,8 @@
     restoreExpandedFolders();
   }
 
-  // Invalidate the cached folder tree whenever a catalog mutates (add/update/remove/delete).
-  // Driven imperatively (not via $:) so the async refetch isn't flagged as a reactive loop.
+  // Drop the cached folder tree on any catalog mutation.
+  // Imperative (not $:) so the async refetch isn't flagged a reactive loop.
   let lastVersion = $catalogVersion;
   onMount(() =>
     catalogVersion.subscribe((v) => {
