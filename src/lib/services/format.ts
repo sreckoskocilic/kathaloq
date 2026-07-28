@@ -1,9 +1,37 @@
-export function formatSize(bytes: number): string {
-  if (bytes <= 0) return "—";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const size = bytes / Math.pow(1024, i);
-  return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+import type { MediaTags } from "../types";
+
+const SIZE_UNITS = ["B", "KB", "MB", "GB", "TB"];
+const SIZE_BASE = 1000;
+
+export function formatSize(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes === 0) return "0 B";
+
+  let i = Math.min(Math.floor(Math.log(bytes) / Math.log(SIZE_BASE)), SIZE_UNITS.length - 1);
+  const digits = () => (i > 0 ? 1 : 0);
+  if (
+    Number((bytes / SIZE_BASE ** i).toFixed(digits())) >= SIZE_BASE &&
+    i < SIZE_UNITS.length - 1
+  ) {
+    i++;
+  }
+  return `${(bytes / SIZE_BASE ** i).toFixed(digits())} ${SIZE_UNITS[i]}`;
+}
+
+export function hasMediaInfo(tags: MediaTags | null | undefined): boolean {
+  if (!tags) return false;
+  return (
+    tags.duration_secs != null ||
+    tags.bitrate != null ||
+    tags.sample_rate != null ||
+    tags.channels != null ||
+    tags.title != null ||
+    tags.artist != null ||
+    tags.album != null ||
+    tags.genre != null ||
+    tags.year != null ||
+    tags.track_number != null
+  );
 }
 
 export function formatDate(iso: string | null): string {

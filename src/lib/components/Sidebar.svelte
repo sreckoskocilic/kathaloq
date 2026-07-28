@@ -3,6 +3,7 @@
   import { catalogs, activeCatalogId, catalogVersion } from "../stores/catalog";
   import { sidebarState } from "../stores/sidebar";
   import { getChildren } from "../services/tauri";
+  import { notifyError } from "../stores/notify";
   import { SvelteSet, SvelteMap } from "svelte/reactivity";
   import TreeNode from "./TreeNode.svelte";
   import type { BreadcrumbItem, Catalog, FileEntry } from "../types";
@@ -70,7 +71,7 @@
             rootFolders.set(catalogId, children);
             rootFolders = rootFolders;
           } catch (e) {
-            console.error(e);
+            notifyError("Failed to expand folder", e);
           }
         }
       }

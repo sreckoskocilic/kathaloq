@@ -22,6 +22,8 @@
     bumpCatalogVersion,
   } from "./lib/stores/catalog";
   import { theme } from "./lib/stores/theme";
+  import { notifyError } from "./lib/stores/notify";
+  import Toasts from "./lib/components/Toasts.svelte";
   import * as api from "./lib/services/tauri";
   import type { FileEntry, BreadcrumbItem, Catalog } from "./lib/types";
 
@@ -39,7 +41,7 @@
     try {
       $catalogs = await api.listCatalogs();
     } catch (e) {
-      console.error("Failed to load catalogs:", e);
+      notifyError("Failed to load catalogs", e);
     }
   }
 
@@ -52,7 +54,7 @@
       bumpCatalogVersion();
       navigateToFolder(id);
     } catch (e) {
-      console.error("Scan failed:", e);
+      notifyError("Scan failed", e);
     } finally {
       $isLoading = false;
     }
@@ -86,7 +88,7 @@
         $breadcrumbs = [];
       }
     } catch (e) {
-      console.error("Failed to delete catalog:", e);
+      notifyError("Failed to delete catalog", e);
     }
   }
 
@@ -120,7 +122,8 @@
         : await api.getChildren(catalogId, parentId);
       if (thisRequest === requestId) $currentFiles = files;
     } catch (e) {
-      console.error("Failed to load files:", e);
+      if (thisRequest === requestId) $currentFiles = [];
+      notifyError("Failed to load files", e);
     }
   }
 
@@ -130,14 +133,37 @@
       const files = await api.searchFiles(catalogId, query);
       if (thisRequest === requestId) $currentFiles = files;
     } catch (e) {
-      console.error("Search failed:", e);
+      if (thisRequest === requestId) $currentFiles = [];
+      notifyError("Search failed", e);
     }
   }
 
-  function handleOpenEntry(entry: FileEntry) {
+  async function refreshCurrentView(catalogId: number) {
+    if ($searchQuery) {
+      await performSearch(catalogId, $searchQuery);
+    } else {
+      const lastCrumb = $breadcrumbs[$breadcrumbs.length - 1];
+      await loadChildren(catalogId, lastCrumb?.id ?? null, $mediaFilter);
+    }
+  }
+
+  async function handleOpenEntry(entry: FileEntry) {
     if (!entry.is_dir || $activeCatalogId === null) return;
+    const catalogId = $activeCatalogId;
+
+    if ($searchQuery) {
+      try {
+        const chain = await api.getAncestors(catalogId, entry.id);
+        $breadcrumbs = chain.map((e) => ({ id: e.id, name: e.name }));
+      } catch (e) {
+        $breadcrumbs = [{ id: entry.id, name: entry.name }];
+        notifyError("Failed to resolve folder path", e);
+      }
+      $searchQuery = "";
+      return;
+    }
+
     $breadcrumbs = [...$breadcrumbs, { id: entry.id, name: entry.name }];
-    $searchQuery = "";
   }
 
   function handleGoUp() {
@@ -162,10 +188,9 @@
       await api.removeFileEntries(catalogId, ids);
       await loadCatalogs();
       bumpCatalogVersion();
-      const lastCrumb = $breadcrumbs[$breadcrumbs.length - 1];
-      await loadChildren(catalogId, lastCrumb?.id ?? null, $mediaFilter);
+      await refreshCurrentView(catalogId);
     } catch (e) {
-      console.error("Failed to remove entries:", e);
+      notifyError("Failed to remove entries", e);
     }
   }
 
@@ -235,11 +260,11 @@
     catalog={updateTarget}
     onComplete={async () => {
       updateTarget = null;
+      $breadcrumbs = [];
       await loadCatalogs();
       bumpCatalogVersion();
       if ($activeCatalogId !== null) {
-        const lastCrumb = $breadcrumbs[$breadcrumbs.length - 1];
-        await loadChildren($activeCatalogId, lastCrumb?.id ?? null, $mediaFilter);
+        await refreshCurrentView($activeCatalogId);
       }
     }}
     onClose={() => (updateTarget = null)}
@@ -257,6 +282,8 @@
 {#if showSettings}
   <SettingsModal onClose={() => (showSettings = false)} />
 {/if}
+
+<Toasts />
 
 <style>
   .app-layout {

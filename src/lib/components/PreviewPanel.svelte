@@ -7,8 +7,10 @@
     formatBitrate,
     formatSampleRate,
     getFileColor,
+    hasMediaInfo,
   } from "../services/format";
   import * as api from "../services/tauri";
+  import { notifyError } from "../stores/notify";
   import { catalogVersion } from "../stores/catalog";
   import type { FileEntry, FolderStats, MediaTags } from "../types";
 
@@ -66,7 +68,8 @@
         folderStats = result;
       }
     } catch (e) {
-      console.error(e);
+      lastLoadKey = "";
+      notifyError("Failed to load details", e);
     }
 
     if (gen !== loadGeneration) return;
@@ -165,7 +168,7 @@
         </div>
       {/if}
 
-      {#if !entry.is_dir && mediaTags}
+      {#if !entry.is_dir && hasMediaInfo(mediaTags)}
         {@const tags = mediaTags}
         <div class="info-section">
           <div class="section-header">Media</div>

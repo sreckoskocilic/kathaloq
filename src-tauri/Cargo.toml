@@ -20,3 +20,4 @@ walkdir = "2"
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["rt"] }
 lofty = "0.22"
+unicode-normalization = "0.1.25"

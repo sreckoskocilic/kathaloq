@@ -8,9 +8,12 @@
   let searchInput = "";
   let searchTimeout: ReturnType<typeof setTimeout>;
 
+  $: if ($searchQuery !== searchInput.trim() && $searchQuery === "") searchInput = "";
+
   function onSearchInput() {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => {
+      if (searchInput) mediaFilter.set(null);
       searchQuery.set(searchInput);
     }, 250);
   }

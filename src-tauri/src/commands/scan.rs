@@ -5,11 +5,17 @@ use tauri::State;
 
 use crate::db::{self, Database};
 use crate::models::UpdatePreview;
-use crate::scanner::{apply_update, preview_update, scan_directory};
+use crate::scanner::{apply_update, index_entries, preview_update, walk_disk};
 
 #[tauri::command]
-pub async fn start_scan(db: State<'_, Database>, path: String, name: String) -> Result<i64, String> {
-    let root = PathBuf::from(&path).canonicalize().map_err(|e| format!("Invalid path: {e}"))?;
+pub async fn start_scan(
+    db: State<'_, Database>,
+    path: String,
+    name: String,
+) -> Result<i64, String> {
+    let root = PathBuf::from(&path)
+        .canonicalize()
+        .map_err(|e| format!("Invalid path: {e}"))?;
     if !root.is_dir() {
         return Err(format!("Not a directory: {path}"));
     }
@@ -20,11 +26,13 @@ pub async fn start_scan(db: State<'_, Database>, path: String, name: String) -> 
     let root_str = root.to_string_lossy().to_string();
 
     tokio::task::spawn_blocking(move || {
+        let entries = walk_disk(&root)?;
+
         let mut conn = db.lock();
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         let catalog_id =
             db::insert_catalog(&tx, &name, &root_str, &scanned_at).map_err(|e| e.to_string())?;
-        scan_directory(&tx, catalog_id, &root)?;
+        index_entries(&tx, catalog_id, &entries)?;
         tx.commit().map_err(|e| e.to_string())?;
         Ok(catalog_id)
     })
@@ -33,13 +41,18 @@ pub async fn start_scan(db: State<'_, Database>, path: String, name: String) -> 
 }
 
 #[tauri::command]
-pub async fn preview_catalog_update(db: State<'_, Database>, catalog_id: i64) -> Result<UpdatePreview, String> {
+pub async fn preview_catalog_update(
+    db: State<'_, Database>,
+    catalog_id: i64,
+) -> Result<UpdatePreview, String> {
     let db = db.inner().clone();
 
     tokio::task::spawn_blocking(move || {
-        let conn = db.lock();
+        let conn = db.read_lock();
         let catalog = db::get_catalog_by_id(&conn, catalog_id).map_err(|e| e.to_string())?;
-        let root = PathBuf::from(&catalog.root_path);
+        let root = PathBuf::from(&catalog.root_path)
+            .canonicalize()
+            .map_err(|_| format!("Path not available: {}", catalog.root_path))?;
         if !root.is_dir() {
             return Err(format!("Path not available: {}", catalog.root_path));
         }
@@ -50,14 +63,19 @@ pub async fn preview_catalog_update(db: State<'_, Database>, catalog_id: i64) ->
 }
 
 #[tauri::command]
-pub async fn apply_catalog_update(db: State<'_, Database>, catalog_id: i64) -> Result<UpdatePreview, String> {
+pub async fn apply_catalog_update(
+    db: State<'_, Database>,
+    catalog_id: i64,
+) -> Result<UpdatePreview, String> {
     let db = db.inner().clone();
 
     tokio::task::spawn_blocking(move || {
         let mut conn = db.lock();
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         let catalog = db::get_catalog_by_id(&tx, catalog_id).map_err(|e| e.to_string())?;
-        let root = PathBuf::from(&catalog.root_path);
+        let root = PathBuf::from(&catalog.root_path)
+            .canonicalize()
+            .map_err(|_| format!("Path not available: {}", catalog.root_path))?;
         if !root.is_dir() {
             return Err(format!("Path not available: {}", catalog.root_path));
         }

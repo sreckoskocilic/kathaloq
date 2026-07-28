@@ -25,8 +25,6 @@ pub fn is_media_file(extension: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
-/// `Ok(true)` stored, `Ok(false)` unparseable (no tags — not an error), `Err` only on a
-/// DB failure so the caller's scan tx aborts instead of committing a tagless row.
 pub fn extract_and_store_tags(
     conn: &Connection,
     file_entry_id: i64,
@@ -35,6 +33,21 @@ pub fn extract_and_store_tags(
     let tagged_file = match Probe::open(file_path).and_then(|p| p.read()) {
         Ok(f) => f,
         Err(_) => {
+            insert_media_tags(
+                conn,
+                file_entry_id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .map_err(|e| e.to_string())?;
             return Ok(false);
         }
     };
@@ -56,7 +69,10 @@ pub fn extract_and_store_tags(
     let mut year: Option<u32> = None;
     let mut track_number: Option<u32> = None;
 
-    if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+    if let Some(tag) = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag())
+    {
         title = tag.title().map(|s| s.to_string());
         artist = tag.artist().map(|s| s.to_string());
         album = tag.album().map(|s| s.to_string());
@@ -80,7 +96,9 @@ pub fn extract_and_store_tags(
         track_number,
     ) {
         Ok(_) => Ok(true),
-        Err(e) => Err(format!("failed to insert media tags for {file_path:?}: {e}")),
+        Err(e) => Err(format!(
+            "failed to insert media tags for {file_path:?}: {e}"
+        )),
     }
 }
 

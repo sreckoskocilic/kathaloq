@@ -39,8 +39,17 @@
     onComplete();
   }
 
+  function requestClose() {
+    if (step === "applying") return;
+    if (step === "done") {
+      onComplete();
+      return;
+    }
+    onClose();
+  }
+
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") onClose();
+    if (e.key === "Escape") requestClose();
   }
 
   $: hasChanges = preview
@@ -54,7 +63,7 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
-<div class="overlay" on:click={onClose} role="presentation">
+<div class="overlay" on:click={requestClose} role="presentation">
   <div
     class="modal"
     on:click|stopPropagation

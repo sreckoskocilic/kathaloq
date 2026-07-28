@@ -6,12 +6,13 @@
 
   let path = "";
   let name = "";
+  let nameIsAuto = true;
 
   async function pickFolder() {
     const selected = await open({ directory: true, multiple: false });
     if (selected) {
       path = selected as string;
-      if (!name) {
+      if (nameIsAuto) {
         const parts = path.split(/[/\\]/);
         name = parts[parts.length - 1] || "Untitled";
       }
@@ -56,7 +57,13 @@
 
     <div class="field">
       <label for="catalog-name">Catalog name</label>
-      <input id="catalog-name" type="text" bind:value={name} placeholder="My External Drive" />
+      <input
+        id="catalog-name"
+        type="text"
+        bind:value={name}
+        on:input={() => (nameIsAuto = false)}
+        placeholder="My External Drive"
+      />
     </div>
 
     <div class="field">

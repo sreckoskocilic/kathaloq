@@ -1,90 +1,54 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use chrono::{DateTime, Utc};
 use rusqlite::Connection;
-use walkdir::WalkDir;
 
 use crate::db::{insert_file_entry, update_catalog_stats};
 use crate::scanner::media::{extract_and_store_tags, is_media_file};
-use crate::scanner::should_skip;
+use crate::scanner::updater::{DiskEntry, walk_disk};
 
 pub fn scan_directory(conn: &Connection, catalog_id: i64, root: &Path) -> Result<(), String> {
+    let entries = walk_disk(root)?;
+    index_entries(conn, catalog_id, &entries)
+}
+
+pub fn index_entries(
+    conn: &Connection,
+    catalog_id: i64,
+    entries: &[DiskEntry],
+) -> Result<(), String> {
     let mut path_to_id: HashMap<String, i64> = HashMap::new();
     let mut total_files: u64 = 0;
     let mut total_size: u64 = 0;
 
-    for entry in WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|e| {
-            if e.path() == root {
-                return true;
-            }
-            !should_skip(&e.file_name().to_string_lossy())
-        })
-    {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let path = entry.path();
-
-        if path == root {
-            continue;
-        }
-
-        let metadata = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-
-        let name = entry.file_name().to_string_lossy().to_string();
-        let rel_path = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
-        let is_dir = metadata.is_dir();
-        let size = if is_dir { 0 } else { metadata.len() };
-
-        let modified = metadata.modified().ok().map(|t| {
-            let dt: DateTime<Utc> = t.into();
-            dt.to_rfc3339()
-        });
-
-        let extension = if !is_dir {
-            path.extension().map(|e| e.to_string_lossy().to_string())
-        } else {
-            None
-        };
-
-        let parent_path = path
+    for entry in entries {
+        let parent_id = Path::new(&entry.rel_path)
             .parent()
-            .and_then(|p| p.strip_prefix(root).ok())
-            .map(|p| p.to_string_lossy().to_string());
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(|p| p.to_string_lossy().to_string())
+            .and_then(|pp| path_to_id.get(&pp).copied());
 
-        let parent_id = parent_path.and_then(|pp| path_to_id.get(&pp).copied());
-
-        let entry_id = match insert_file_entry(
+        let entry_id = insert_file_entry(
             conn,
             catalog_id,
             parent_id,
-            &name,
-            &rel_path,
-            is_dir,
-            size,
-            modified.as_deref(),
-            extension.as_deref(),
-        ) {
-            Ok(id) => id,
-            Err(_) => continue,
-        };
+            &entry.name,
+            &entry.rel_path,
+            entry.is_dir,
+            entry.size,
+            entry.modified.as_deref(),
+            entry.extension.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
 
-        path_to_id.insert(rel_path, entry_id);
+        path_to_id.insert(entry.rel_path.clone(), entry_id);
 
-        if !is_dir {
+        if !entry.is_dir {
             total_files += 1;
-            total_size += size;
+            total_size += entry.size;
 
-            if is_media_file(extension.as_deref()) {
-                extract_and_store_tags(conn, entry_id, path)?;
+            if is_media_file(entry.extension.as_deref()) {
+                extract_and_store_tags(conn, entry_id, &entry.full_path)?;
             }
         }
     }

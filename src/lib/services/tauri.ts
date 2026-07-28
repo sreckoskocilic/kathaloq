@@ -20,6 +20,10 @@ export async function getChildren(
   return invoke<FileEntry[]>("get_children", { catalogId, parentId });
 }
 
+export async function getAncestors(catalogId: number, entryId: number): Promise<FileEntry[]> {
+  return invoke<FileEntry[]>("get_ancestors", { catalogId, entryId });
+}
+
 export async function searchFiles(catalogId: number, query: string): Promise<FileEntry[]> {
   return invoke<FileEntry[]>("search_files", { catalogId, query });
 }

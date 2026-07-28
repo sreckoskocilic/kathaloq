@@ -3,6 +3,7 @@
   import { activeCatalog, currentFiles, catalogVersion } from "../stores/catalog";
   import { theme } from "../stores/theme";
   import { formatSize } from "../services/format";
+  import { notifyError } from "../stores/notify";
   import * as api from "../services/tauri";
   import type { FileEntry } from "../types";
 
@@ -41,7 +42,7 @@
       );
       if (gen === sizeGen) selectionSize = stats.total_size;
     } catch (e) {
-      console.error(e);
+      notifyError("Failed to size selection", e);
     }
   }
 </script>
@@ -57,7 +58,7 @@
       <span class="sep">·</span>
       <span class="stat">{fileCount} files</span>
       <span class="sep">·</span>
-      <span class="stat">{formatSize($activeCatalog.total_size)} total</span>
+      <span class="stat">{$activeCatalog.name}: {formatSize($activeCatalog.total_size)}</span>
     {:else}
       <span class="stat muted">Select a catalog</span>
     {/if}

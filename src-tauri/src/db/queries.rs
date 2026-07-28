@@ -1,11 +1,30 @@
-use rusqlite::{params, Connection};
+use std::collections::HashMap;
+
+use rusqlite::{Connection, params};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::models::{Catalog, FileEntry, FolderStats, MediaTags};
+
+pub fn search_key(value: &str) -> String {
+    value
+        .nfc()
+        .collect::<String>()
+        .to_lowercase()
+        .nfc()
+        .collect()
+}
 
 /// Depth cap for the recursive tree CTEs: bounds runaway depth and ends cycles.
 const MAX_TREE_DEPTH: u32 = 100;
 
-pub fn insert_catalog(conn: &Connection, name: &str, root_path: &str, scanned_at: &str) -> rusqlite::Result<i64> {
+const MAX_SQL_PARAMS: usize = 30_000;
+
+pub fn insert_catalog(
+    conn: &Connection,
+    name: &str,
+    root_path: &str,
+    scanned_at: &str,
+) -> rusqlite::Result<i64> {
     conn.execute(
         "INSERT INTO catalogs (name, root_path, scanned_at) VALUES (?1, ?2, ?3)",
         params![name, root_path, scanned_at],
@@ -13,7 +32,12 @@ pub fn insert_catalog(conn: &Connection, name: &str, root_path: &str, scanned_at
     Ok(conn.last_insert_rowid())
 }
 
-pub fn update_catalog_stats(conn: &Connection, id: i64, total_files: u64, total_size: u64) -> rusqlite::Result<()> {
+pub fn update_catalog_stats(
+    conn: &Connection,
+    id: i64,
+    total_files: u64,
+    total_size: u64,
+) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE catalogs SET total_files = ?1, total_size = ?2 WHERE id = ?3",
         params![total_files, total_size, id],
@@ -57,14 +81,18 @@ pub fn insert_file_entry(
 ) -> rusqlite::Result<i64> {
     // Cached stmt: per-file scan hot path, skip re-parsing the INSERT each file.
     conn.prepare_cached(
-        "INSERT INTO file_entries (catalog_id, parent_id, name, path, is_dir, size, modified, extension)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO file_entries (catalog_id, parent_id, name, name_lower, path, is_dir, size, modified, extension)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )?
-    .execute(params![catalog_id, parent_id, name, path, is_dir as i32, size, modified, extension])?;
+    .execute(params![catalog_id, parent_id, name, search_key(name), path, is_dir as i32, size, modified, extension])?;
     Ok(conn.last_insert_rowid())
 }
 
-pub fn get_children(conn: &Connection, catalog_id: i64, parent_id: Option<i64>) -> rusqlite::Result<Vec<FileEntry>> {
+pub fn get_children(
+    conn: &Connection,
+    catalog_id: i64,
+    parent_id: Option<i64>,
+) -> rusqlite::Result<Vec<FileEntry>> {
     let mut stmt = if parent_id.is_some() {
         conn.prepare(
             "SELECT id, catalog_id, parent_id, name, path, is_dir, size, modified, extension
@@ -87,15 +115,45 @@ pub fn get_children(conn: &Connection, catalog_id: i64, parent_id: Option<i64>) 
     rows.collect()
 }
 
-pub fn search_files(conn: &Connection, catalog_id: i64, query: &str) -> rusqlite::Result<Vec<FileEntry>> {
-    let escaped = query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+pub fn search_files(
+    conn: &Connection,
+    catalog_id: i64,
+    query: &str,
+) -> rusqlite::Result<Vec<FileEntry>> {
+    let escaped = search_key(query)
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
     let pattern = format!("%{escaped}%");
     let mut stmt = conn.prepare(
         "SELECT id, catalog_id, parent_id, name, path, is_dir, size, modified, extension
-         FROM file_entries WHERE catalog_id = ?1 AND name LIKE ?2 ESCAPE '\\'
-         ORDER BY is_dir DESC, name ASC LIMIT 500",
+         FROM file_entries WHERE catalog_id = ?1 AND name_lower LIKE ?2 ESCAPE '\\'
+         ORDER BY is_dir DESC, name_lower ASC LIMIT 500",
     )?;
     let rows = stmt.query_map(params![catalog_id, pattern], map_file_entry)?;
+    rows.collect()
+}
+
+pub fn get_ancestors(
+    conn: &Connection,
+    catalog_id: i64,
+    entry_id: i64,
+) -> rusqlite::Result<Vec<FileEntry>> {
+    let sql = format!(
+        "WITH RECURSIVE chain(id, depth) AS (
+            SELECT id, 0 FROM file_entries WHERE catalog_id = ?1 AND id = ?2
+            UNION
+            SELECT fe.parent_id, c.depth + 1 FROM file_entries fe
+            JOIN chain c ON fe.id = c.id
+            WHERE fe.parent_id IS NOT NULL AND fe.catalog_id = ?1 AND c.depth < {MAX_TREE_DEPTH}
+        )
+        SELECT fe.id, fe.catalog_id, fe.parent_id, fe.name, fe.path, fe.is_dir, fe.size, fe.modified, fe.extension
+         FROM file_entries fe JOIN chain c ON fe.id = c.id
+         WHERE fe.catalog_id = ?1
+         ORDER BY c.depth DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![catalog_id, entry_id], map_file_entry)?;
     rows.collect()
 }
 
@@ -108,38 +166,70 @@ pub fn get_all_entries(conn: &Connection, catalog_id: i64) -> rusqlite::Result<V
     rows.collect()
 }
 
-pub fn delete_file_entries_by_ids(conn: &Connection, ids: &[i64]) -> rusqlite::Result<()> {
+pub fn delete_file_entries_by_ids(
+    conn: &Connection,
+    catalog_id: i64,
+    ids: &[i64],
+) -> rusqlite::Result<()> {
     for id in ids.iter().rev() {
-        conn.execute("DELETE FROM file_entries WHERE id = ?1", params![id])?;
+        conn.execute(
+            "DELETE FROM file_entries WHERE id = ?1 AND catalog_id = ?2",
+            params![id, catalog_id],
+        )?;
     }
     Ok(())
 }
 
-pub fn collect_descendant_ids(conn: &Connection, root_ids: &[i64]) -> rusqlite::Result<Vec<i64>> {
+pub fn collect_descendant_ids(
+    conn: &Connection,
+    catalog_id: i64,
+    root_ids: &[i64],
+) -> rusqlite::Result<Vec<i64>> {
+    let mut depth_by_id: HashMap<i64, i64> = HashMap::new();
+    for chunk in root_ids.chunks(MAX_SQL_PARAMS) {
+        for (id, depth) in collect_descendants_chunk(conn, catalog_id, chunk)? {
+            depth_by_id
+                .entry(id)
+                .and_modify(|d| *d = (*d).min(depth))
+                .or_insert(depth);
+        }
+    }
+
+    let mut pairs: Vec<(i64, i64)> = depth_by_id.into_iter().collect();
+    pairs.sort_by_key(|&(id, depth)| (depth, id));
+    Ok(pairs.into_iter().map(|(id, _)| id).collect())
+}
+
+fn collect_descendants_chunk(
+    conn: &Connection,
+    catalog_id: i64,
+    root_ids: &[i64],
+) -> rusqlite::Result<Vec<(i64, i64)>> {
     if root_ids.is_empty() {
         return Ok(Vec::new());
     }
-    // One CTE, not a query per node. UNION + depth cap stop cycles; parents sort
-    // before children so a reversed delete stays FK-safe.
     let placeholders: String = (0..root_ids.len())
-        .map(|i| format!("?{}", i + 1))
+        .map(|i| format!("?{}", i + 2))
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!(
         "WITH RECURSIVE descendants(id, depth) AS (
-            SELECT id, 0 FROM file_entries WHERE id IN ({placeholders})
+            SELECT id, 0 FROM file_entries WHERE catalog_id = ?1 AND id IN ({placeholders})
             UNION
             SELECT fe.id, d.depth + 1 FROM file_entries fe
             JOIN descendants d ON fe.parent_id = d.id
-            WHERE d.depth < {MAX_TREE_DEPTH}
+            WHERE fe.catalog_id = ?1 AND d.depth < {MAX_TREE_DEPTH}
         )
-        SELECT id FROM descendants GROUP BY id ORDER BY MIN(depth)",
+        SELECT id, MIN(depth) FROM descendants GROUP BY id ORDER BY MIN(depth)",
         MAX_TREE_DEPTH = MAX_TREE_DEPTH,
     );
-    let params: Vec<&dyn rusqlite::ToSql> =
-        root_ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+    let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(root_ids.len() + 1);
+    params.push(&catalog_id);
+    for id in root_ids {
+        params.push(id as &dyn rusqlite::ToSql);
+    }
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params.as_slice(), |row| row.get(0))?;
+    let rows = stmt.query_map(params.as_slice(), |row| Ok((row.get(0)?, row.get(1)?)))?;
     rows.collect()
 }
 
@@ -163,7 +253,11 @@ pub fn update_file_entry_metadata(
     Ok(())
 }
 
-pub fn update_catalog_scanned_at(conn: &Connection, id: i64, scanned_at: &str) -> rusqlite::Result<()> {
+pub fn update_catalog_scanned_at(
+    conn: &Connection,
+    id: i64,
+    scanned_at: &str,
+) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE catalogs SET scanned_at = ?1 WHERE id = ?2",
         params![scanned_at, id],
@@ -188,7 +282,11 @@ pub fn get_catalog_by_id(conn: &Connection, id: i64) -> rusqlite::Result<Catalog
     )
 }
 
-pub fn get_folder_stats(conn: &Connection, catalog_id: i64, folder_id: i64) -> rusqlite::Result<FolderStats> {
+pub fn get_folder_stats(
+    conn: &Connection,
+    catalog_id: i64,
+    folder_id: i64,
+) -> rusqlite::Result<FolderStats> {
     // SUM over descendants in one CTE, not id-collect + a query_row per row (old N+1).
     let (file_count, folder_count, total_size): (u64, u64, u64) = conn.query_row(
         "WITH RECURSIVE descendants(id, depth) AS (
@@ -215,11 +313,19 @@ pub fn get_folder_stats(conn: &Connection, catalog_id: i64, folder_id: i64) -> r
     })
 }
 
-pub fn get_bulk_stats(conn: &Connection, catalog_id: i64, ids: &[i64]) -> rusqlite::Result<FolderStats> {
+pub fn get_bulk_stats(
+    conn: &Connection,
+    catalog_id: i64,
+    ids: &[i64],
+) -> rusqlite::Result<FolderStats> {
     // Coverage set: a selected file counts itself, a selected folder its descendants
     // (not itself), overlaps de-dup. One CTE, not the old per-id query loops.
     if ids.is_empty() {
-        return Ok(FolderStats { file_count: 0, folder_count: 0, total_size: 0 });
+        return Ok(FolderStats {
+            file_count: 0,
+            folder_count: 0,
+            total_size: 0,
+        });
     }
     let placeholders: String = (0..ids.len())
         .map(|i| format!("?{}", i + 1))
@@ -293,7 +399,10 @@ pub fn insert_media_tags(
     Ok(conn.last_insert_rowid())
 }
 
-pub fn get_media_tags(conn: &Connection, file_entry_id: i64) -> rusqlite::Result<Option<MediaTags>> {
+pub fn get_media_tags(
+    conn: &Connection,
+    file_entry_id: i64,
+) -> rusqlite::Result<Option<MediaTags>> {
     let mut stmt = conn.prepare(
         "SELECT id, file_entry_id, duration_secs, bitrate, sample_rate, channels, title, artist, album, genre, year, track_number
          FROM media_tags WHERE file_entry_id = ?1",
@@ -321,7 +430,10 @@ pub fn get_media_tags(conn: &Connection, file_entry_id: i64) -> rusqlite::Result
     }
 }
 
-pub fn get_media_tags_bulk(conn: &Connection, file_entry_ids: &[i64]) -> rusqlite::Result<Vec<MediaTags>> {
+pub fn get_media_tags_bulk(
+    conn: &Connection,
+    file_entry_ids: &[i64],
+) -> rusqlite::Result<Vec<MediaTags>> {
     if file_entry_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -334,8 +446,10 @@ pub fn get_media_tags_bulk(conn: &Connection, file_entry_ids: &[i64]) -> rusqlit
         "SELECT id, file_entry_id, duration_secs, bitrate, sample_rate, channels, title, artist, album, genre, year, track_number
          FROM media_tags WHERE file_entry_id IN ({placeholders})"
     );
-    let params: Vec<&dyn rusqlite::ToSql> =
-        file_entry_ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+    let params: Vec<&dyn rusqlite::ToSql> = file_entry_ids
+        .iter()
+        .map(|id| id as &dyn rusqlite::ToSql)
+        .collect();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params.as_slice(), |row| {
         Ok(MediaTags {
@@ -452,7 +566,14 @@ mod tests {
         insert_file_entry(c, cat, parent, name, name, true, 0, None, None).unwrap()
     }
 
-    fn file(c: &Connection, cat: i64, parent: Option<i64>, name: &str, size: u64, ext: &str) -> i64 {
+    fn file(
+        c: &Connection,
+        cat: i64,
+        parent: Option<i64>,
+        name: &str,
+        size: u64,
+        ext: &str,
+    ) -> i64 {
         insert_file_entry(c, cat, parent, name, name, false, size, None, Some(ext)).unwrap()
     }
 
@@ -464,7 +585,7 @@ mod tests {
         let b = dir(&c, cat, Some(a), "a/b");
         let f = file(&c, cat, Some(b), "a/b/f.txt", 1, "txt");
 
-        let mut ids = collect_descendant_ids(&c, &[a]).unwrap();
+        let mut ids = collect_descendant_ids(&c, cat, &[a]).unwrap();
         ids.sort();
         let mut expected = vec![a, b, f];
         expected.sort();
@@ -479,10 +600,13 @@ mod tests {
         let a = dir(&c, cat, None, "a");
         let b = dir(&c, cat, Some(a), "a/b");
         // Make it circular: a↔b.
-        c.execute("UPDATE file_entries SET parent_id = ?1 WHERE id = ?2", params![b, a])
-            .unwrap();
+        c.execute(
+            "UPDATE file_entries SET parent_id = ?1 WHERE id = ?2",
+            params![b, a],
+        )
+        .unwrap();
 
-        let mut ids = collect_descendant_ids(&c, &[a]).unwrap();
+        let mut ids = collect_descendant_ids(&c, cat, &[a]).unwrap();
         ids.sort();
         let mut expected = vec![a, b];
         expected.sort();
@@ -498,9 +622,133 @@ mod tests {
         let b = dir(&c, cat, Some(a), "a/b");
         let _f = file(&c, cat, Some(b), "a/b/f.txt", 1, "txt");
 
-        let ids = collect_descendant_ids(&c, &[a]).unwrap();
-        delete_file_entries_by_ids(&c, &ids).expect("delete must not violate FK");
+        let ids = collect_descendant_ids(&c, cat, &[a]).unwrap();
+        delete_file_entries_by_ids(&c, cat, &ids).expect("delete must not violate FK");
         assert_eq!(get_all_entries(&c, cat).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn ancestors_return_the_full_chain_root_first() {
+        let c = conn();
+        let cat = catalog(&c);
+        let other = catalog(&c);
+        let archive = dir(&c, cat, None, "Archive");
+        let photos = dir(&c, cat, Some(archive), "Archive/Photos");
+        let year = dir(&c, cat, Some(photos), "Archive/Photos/2019");
+
+        let chain = get_ancestors(&c, cat, year).unwrap();
+        let names: Vec<&str> = chain.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Archive", "Archive/Photos", "Archive/Photos/2019"]
+        );
+
+        assert_eq!(get_ancestors(&c, cat, archive).unwrap().len(), 1);
+        assert!(get_ancestors(&c, other, year).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_matches_macos_decomposed_filenames() {
+        let c = conn();
+        let cat = catalog(&c);
+        let decomposed = "Kres\u{30c}imir Mis\u{30c}ak Sve pis\u{30c}e u novinama .pdf";
+        assert!(!decomposed.contains('š'), "fixture must stay decomposed");
+        file(&c, cat, None, decomposed, 1, "pdf");
+
+        for query in ["Mišak", "mišak", "Krešimir", "piše"] {
+            assert_eq!(
+                search_files(&c, cat, query).unwrap().len(),
+                1,
+                "composed query {query:?} must match a decomposed filename"
+            );
+        }
+
+        assert_eq!(search_files(&c, cat, "Mis\u{30c}ak").unwrap().len(), 1);
+        assert_eq!(search_files(&c, cat, "Misak").unwrap().len(), 0);
+    }
+
+    #[test]
+    fn migration_recomposes_name_lower_written_before_normalization() {
+        let c = conn();
+        let cat = catalog(&c);
+        let id = file(&c, cat, None, "Kres\u{30c}imir Mis\u{30c}ak.pdf", 1, "pdf");
+        c.execute(
+            "UPDATE file_entries SET name_lower = ?1 WHERE id = ?2",
+            params!["kres\u{30c}imir mis\u{30c}ak.pdf", id],
+        )
+        .unwrap();
+        c.execute_batch("PRAGMA user_version = 0;").unwrap();
+        assert_eq!(search_files(&c, cat, "Mišak").unwrap().len(), 0);
+
+        run_migrations(&c).unwrap();
+
+        assert_eq!(
+            search_files(&c, cat, "Mišak").unwrap().len(),
+            1,
+            "an existing catalog must be re-folded on startup"
+        );
+    }
+
+    #[test]
+    fn search_folds_case_for_accented_names() {
+        let c = conn();
+        let cat = catalog(&c);
+        file(&c, cat, None, "Žuti pas.mp3", 1, "mp3");
+        file(&c, cat, None, "šarena čaša.flac", 1, "flac");
+        file(&c, cat, None, "Zebra.mp3", 1, "mp3");
+
+        for query in ["žuti", "ŽUTI", "Žuti"] {
+            let hits = search_files(&c, cat, query).unwrap();
+            assert_eq!(hits.len(), 1, "query {query:?} must match Žuti pas.mp3");
+            assert_eq!(hits[0].name, "Žuti pas.mp3");
+        }
+
+        assert_eq!(search_files(&c, cat, "ČAŠA").unwrap().len(), 1);
+        assert_eq!(search_files(&c, cat, "zebra").unwrap().len(), 1);
+        assert_eq!(search_files(&c, cat, "đ").unwrap().len(), 0);
+    }
+
+    #[test]
+    fn migration_backfills_name_lower_for_existing_rows() {
+        let c = conn();
+        let cat = catalog(&c);
+        let id = file(&c, cat, None, "Žuti pas.mp3", 1, "mp3");
+        c.execute(
+            "UPDATE file_entries SET name_lower = NULL WHERE id = ?1",
+            params![id],
+        )
+        .unwrap();
+        assert_eq!(search_files(&c, cat, "žuti").unwrap().len(), 0);
+
+        run_migrations(&c).unwrap();
+
+        assert_eq!(
+            search_files(&c, cat, "žuti").unwrap().len(),
+            1,
+            "rows written before the column existed must be folded on startup"
+        );
+    }
+
+    #[test]
+    fn descendant_walk_and_delete_stay_inside_their_catalog() {
+        let c = conn();
+        let one = catalog(&c);
+        let two = catalog(&c);
+        let a = dir(&c, one, None, "a");
+        let b = dir(&c, one, Some(a), "a/b");
+        let f = file(&c, one, Some(b), "a/b/f.txt", 1, "txt");
+
+        assert!(
+            collect_descendant_ids(&c, two, &[a]).unwrap().is_empty(),
+            "ids from another catalog must not resolve"
+        );
+
+        delete_file_entries_by_ids(&c, two, &[f, b, a]).unwrap();
+        assert_eq!(
+            get_all_entries(&c, one).unwrap().len(),
+            3,
+            "a stale catalog id must not delete another catalog's rows"
+        );
     }
 
     #[test]
@@ -589,7 +837,11 @@ mod tests {
             .into_iter()
             .map(|e| e.name)
             .collect();
-        assert_eq!(root, vec!["music"], "deep-media ancestor kept, non-media dir dropped");
+        assert_eq!(
+            root,
+            vec!["music"],
+            "deep-media ancestor kept, non-media dir dropped"
+        );
 
         // One level down: the intermediate `music/2020` dir is surfaced.
         let inside: Vec<String> = get_children_filtered(&c, cat, Some(music), "audio")
@@ -637,7 +889,11 @@ mod tests {
             .into_iter()
             .map(|e| e.name)
             .collect();
-        assert_eq!(hits, vec!["a_b.txt"], "_ is a literal, not a single-char wildcard");
+        assert_eq!(
+            hits,
+            vec!["a_b.txt"],
+            "_ is a literal, not a single-char wildcard"
+        );
     }
 
     #[test]

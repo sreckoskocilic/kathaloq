@@ -12,7 +12,8 @@ use crate::models::{Catalog, FileEntry, FolderStats, MediaTags};
 pub async fn list_catalogs(db: State<'_, Database>) -> Result<Vec<Catalog>, String> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
-        db.with_read_conn(db::list_catalogs).map_err(|e| e.to_string())
+        db.with_read_conn(db::list_catalogs)
+            .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -38,6 +39,21 @@ pub async fn get_children(
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         db.with_read_conn(|conn| db::get_children(conn, catalog_id, parent_id))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_ancestors(
+    db: State<'_, Database>,
+    catalog_id: i64,
+    entry_id: i64,
+) -> Result<Vec<FileEntry>, String> {
+    let db = db.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        db.with_read_conn(|conn| db::get_ancestors(conn, catalog_id, entry_id))
             .map_err(|e| e.to_string())
     })
     .await
@@ -126,8 +142,10 @@ pub async fn get_children_filtered(
 ) -> Result<Vec<FileEntry>, String> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
-        db.with_read_conn(|conn| db::get_children_filtered(conn, catalog_id, parent_id, &media_type))
-            .map_err(|e| e.to_string())
+        db.with_read_conn(|conn| {
+            db::get_children_filtered(conn, catalog_id, parent_id, &media_type)
+        })
+        .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -143,8 +161,9 @@ pub async fn remove_file_entries(
     tokio::task::spawn_blocking(move || {
         let mut conn = db.lock();
         let tx = conn.transaction().map_err(|e| e.to_string())?;
-        let all_ids = db::collect_descendant_ids(&tx, &ids).map_err(|e| e.to_string())?;
-        db::delete_file_entries_by_ids(&tx, &all_ids).map_err(|e| e.to_string())?;
+        let all_ids =
+            db::collect_descendant_ids(&tx, catalog_id, &ids).map_err(|e| e.to_string())?;
+        db::delete_file_entries_by_ids(&tx, catalog_id, &all_ids).map_err(|e| e.to_string())?;
         db::recalc_catalog_stats(&tx, catalog_id).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())
     })

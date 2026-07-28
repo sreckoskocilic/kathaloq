@@ -1,9 +1,9 @@
 pub mod media;
-mod updater;
+pub mod updater;
 mod walker;
 
-pub use updater::{apply_update, preview_update};
-pub use walker::scan_directory;
+pub use updater::{apply_update, preview_update, walk_disk};
+pub use walker::{index_entries, scan_directory};
 
 const IGNORED_NAMES: &[&str] = &[
     "$RECYCLE.BIN",

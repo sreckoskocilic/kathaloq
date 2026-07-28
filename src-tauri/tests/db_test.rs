@@ -33,8 +33,30 @@ fn test_delete_catalog_cascades() {
     let catalog_id =
         kathaloq_lib::db::insert_catalog(&conn, "Test", "/tmp", "2024-01-01T00:00:00Z").unwrap();
 
-    kathaloq_lib::db::insert_file_entry(&conn, catalog_id, None, "a.txt", "a.txt", false, 100, None, Some("txt")).unwrap();
-    kathaloq_lib::db::insert_file_entry(&conn, catalog_id, None, "b.txt", "b.txt", false, 200, None, Some("txt")).unwrap();
+    kathaloq_lib::db::insert_file_entry(
+        &conn,
+        catalog_id,
+        None,
+        "a.txt",
+        "a.txt",
+        false,
+        100,
+        None,
+        Some("txt"),
+    )
+    .unwrap();
+    kathaloq_lib::db::insert_file_entry(
+        &conn,
+        catalog_id,
+        None,
+        "b.txt",
+        "b.txt",
+        false,
+        200,
+        None,
+        Some("txt"),
+    )
+    .unwrap();
 
     let children = kathaloq_lib::db::get_children(&conn, catalog_id, None).unwrap();
     assert_eq!(children.len(), 2);
@@ -57,8 +79,17 @@ fn test_media_tags_crud() {
         kathaloq_lib::db::insert_catalog(&conn, "Test", "/tmp", "2024-01-01T00:00:00Z").unwrap();
 
     let entry_id = kathaloq_lib::db::insert_file_entry(
-        &conn, catalog_id, None, "song.mp3", "song.mp3", false, 5000, None, Some("mp3"),
-    ).unwrap();
+        &conn,
+        catalog_id,
+        None,
+        "song.mp3",
+        "song.mp3",
+        false,
+        5000,
+        None,
+        Some("mp3"),
+    )
+    .unwrap();
 
     // No tags initially
     let tags = kathaloq_lib::db::get_media_tags(&conn, entry_id).unwrap();
@@ -67,12 +98,24 @@ fn test_media_tags_crud() {
     // Insert tags — exhaustive every-column roundtrip (the inline roundtrip test
     // only asserts a subset; this is the full serialization oracle).
     kathaloq_lib::db::insert_media_tags(
-        &conn, entry_id, Some(180.5), Some(320), Some(44100), Some(2),
-        Some("Test Song"), Some("Test Artist"), Some("Test Album"),
-        Some("Rock"), Some(2024), Some(1),
-    ).unwrap();
+        &conn,
+        entry_id,
+        Some(180.5),
+        Some(320),
+        Some(44100),
+        Some(2),
+        Some("Test Song"),
+        Some("Test Artist"),
+        Some("Test Album"),
+        Some("Rock"),
+        Some(2024),
+        Some(1),
+    )
+    .unwrap();
 
-    let tags = kathaloq_lib::db::get_media_tags(&conn, entry_id).unwrap().unwrap();
+    let tags = kathaloq_lib::db::get_media_tags(&conn, entry_id)
+        .unwrap()
+        .unwrap();
     assert_eq!(tags.title.as_deref(), Some("Test Song"));
     assert_eq!(tags.artist.as_deref(), Some("Test Artist"));
     assert_eq!(tags.album.as_deref(), Some("Test Album"));
@@ -93,19 +136,39 @@ fn test_media_tags_cascade_on_file_delete() {
         kathaloq_lib::db::insert_catalog(&conn, "Test", "/tmp", "2024-01-01T00:00:00Z").unwrap();
 
     let entry_id = kathaloq_lib::db::insert_file_entry(
-        &conn, catalog_id, None, "song.mp3", "song.mp3", false, 5000, None, Some("mp3"),
-    ).unwrap();
+        &conn,
+        catalog_id,
+        None,
+        "song.mp3",
+        "song.mp3",
+        false,
+        5000,
+        None,
+        Some("mp3"),
+    )
+    .unwrap();
 
     kathaloq_lib::db::insert_media_tags(
-        &conn, entry_id, Some(180.0), Some(320), None, None,
-        None, None, None, None, None, None,
-    ).unwrap();
+        &conn,
+        entry_id,
+        Some(180.0),
+        Some(320),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
 
     let tags = kathaloq_lib::db::get_media_tags(&conn, entry_id).unwrap();
     assert!(tags.is_some());
 
     // Delete file entry — media_tags should cascade
-    kathaloq_lib::db::delete_file_entries_by_ids(&conn, &[entry_id]).unwrap();
+    kathaloq_lib::db::delete_file_entries_by_ids(&conn, catalog_id, &[entry_id]).unwrap();
 
     let tags = kathaloq_lib::db::get_media_tags(&conn, entry_id).unwrap();
     assert!(tags.is_none());
@@ -119,12 +182,30 @@ fn test_update_file_entry_metadata() {
         kathaloq_lib::db::insert_catalog(&conn, "Test", "/tmp", "2024-01-01T00:00:00Z").unwrap();
 
     let entry_id = kathaloq_lib::db::insert_file_entry(
-        &conn, catalog_id, None, "a.txt", "a.txt", false, 100, Some("2024-01-01T00:00:00Z"), Some("txt"),
-    ).unwrap();
+        &conn,
+        catalog_id,
+        None,
+        "a.txt",
+        "a.txt",
+        false,
+        100,
+        Some("2024-01-01T00:00:00Z"),
+        Some("txt"),
+    )
+    .unwrap();
 
-    kathaloq_lib::db::update_file_entry_metadata(&conn, entry_id, 200, Some("2024-06-01T00:00:00Z")).unwrap();
+    kathaloq_lib::db::update_file_entry_metadata(
+        &conn,
+        entry_id,
+        200,
+        Some("2024-06-01T00:00:00Z"),
+    )
+    .unwrap();
 
     let children = kathaloq_lib::db::get_children(&conn, catalog_id, None).unwrap();
     assert_eq!(children[0].size, 200);
-    assert_eq!(children[0].modified.as_deref(), Some("2024-06-01T00:00:00Z"));
+    assert_eq!(
+        children[0].modified.as_deref(),
+        Some("2024-06-01T00:00:00Z")
+    );
 }

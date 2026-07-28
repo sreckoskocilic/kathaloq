@@ -2,6 +2,7 @@
   import { columns, toggleColumn } from "../stores/settings";
   import { theme } from "../stores/theme";
   import { getThirdPartyLicenses } from "../services/tauri";
+  import { notifyError } from "../stores/notify";
   import type { Theme } from "../types";
 
   export let onClose: () => void;
@@ -23,7 +24,7 @@
     try {
       licensesHtml = await getThirdPartyLicenses();
     } catch (e) {
-      console.error(e);
+      notifyError("Failed to load licenses", e);
       licensesHtml = "<p>Failed to load licenses.</p>";
     }
     licensesLoading = false;

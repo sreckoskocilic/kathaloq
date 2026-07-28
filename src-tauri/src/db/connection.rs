@@ -16,8 +16,9 @@ impl Database {
         let db_path = app_dir.join("kathaloq.db");
 
         let write_conn = Connection::open(&db_path)?;
-        write_conn
-            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")?;
+        write_conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
+        )?;
         run_migrations(&write_conn)?;
 
         let read_conn = Connection::open(&db_path)?;
@@ -49,5 +50,9 @@ impl Database {
 
     pub fn lock(&self) -> MutexGuard<'_, Connection> {
         self.write_conn.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn read_lock(&self) -> MutexGuard<'_, Connection> {
+        self.read_conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 }

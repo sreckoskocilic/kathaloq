@@ -7,8 +7,10 @@
     formatBitrate,
     formatSampleRate,
     getFileColor,
+    hasMediaInfo,
   } from "../services/format";
   import * as api from "../services/tauri";
+  import { notifyError } from "../stores/notify";
   import type { FileEntry, FolderStats, MediaTags } from "../types";
 
   export let entries: FileEntry[];
@@ -35,7 +37,7 @@
           .then((s) => {
             folderStats = s;
           })
-          .catch((e) => console.error(e))
+          .catch((e) => notifyError("Failed to load details", e))
       );
     } else if (isSingle && !entry.is_dir) {
       promises.push(
@@ -44,7 +46,7 @@
           .then((t) => {
             mediaTags = t;
           })
-          .catch((e) => console.error(e))
+          .catch((e) => notifyError("Failed to load details", e))
       );
     } else if (isMulti) {
       promises.push(
@@ -56,7 +58,7 @@
           .then((s) => {
             bulkStats = s;
           })
-          .catch((e) => console.error(e))
+          .catch((e) => notifyError("Failed to load details", e))
       );
       const fileIds = entries.filter((e) => !e.is_dir).map((e) => e.id);
       if (fileIds.length > 0) {
@@ -66,7 +68,7 @@
             .then((t) => {
               bulkMediaTags = t;
             })
-            .catch((e) => console.error(e))
+            .catch((e) => notifyError("Failed to load details", e))
         );
       }
     }
@@ -81,7 +83,7 @@
 
   function getCommonValue<T>(values: (T | null | undefined)[]): T | null {
     const defined = values.filter((v): v is T => v != null);
-    if (defined.length === 0) return null;
+    if (defined.length === 0 || defined.length !== values.length) return null;
     const first = defined[0];
     return defined.every((v) => v === first) ? first : null;
   }
@@ -103,7 +105,7 @@
   $: commonYear =
     bulkMediaTags.length > 0 ? getCommonValue(bulkMediaTags.map((t) => t.year)) : null;
   $: totalDuration = bulkMediaTags.reduce((sum, t) => sum + (t.duration_secs ?? 0), 0);
-  $: hasMultiMediaTags = bulkMediaTags.length > 0;
+  $: hasMultiMediaTags = bulkMediaTags.some(hasMediaInfo);
 </script>
 
 <svelte:window on:keydown={handleKeydown} />
@@ -191,7 +193,7 @@
           </div>
         {/if}
 
-        {#if !entry.is_dir && mediaTags && !loading}
+        {#if !entry.is_dir && hasMediaInfo(mediaTags) && !loading}
           {@const tags = mediaTags}
           <div class="info-divider"></div>
           <div class="section-title">Media Info</div>

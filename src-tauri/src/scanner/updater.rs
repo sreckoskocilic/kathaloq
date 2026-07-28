@@ -8,26 +8,26 @@ use walkdir::WalkDir;
 use std::collections::HashSet;
 
 use crate::db::{
-    delete_file_entries_by_ids, get_all_entries, get_media_tags, insert_file_entry,
-    recalc_catalog_stats, update_catalog_scanned_at, update_file_entry_metadata,
+    collect_descendant_ids, delete_file_entries_by_ids, get_all_entries, get_media_tags,
+    insert_file_entry, recalc_catalog_stats, update_catalog_scanned_at, update_file_entry_metadata,
 };
 use crate::models::{FileEntry, UpdatePreview};
 use crate::scanner::media::{extract_and_store_tags, is_media_file};
 use crate::scanner::should_skip;
 
-struct DiskEntry {
-    name: String,
-    rel_path: String,
-    full_path: std::path::PathBuf,
-    is_dir: bool,
-    size: u64,
-    modified: Option<String>,
-    extension: Option<String>,
+pub struct DiskEntry {
+    pub name: String,
+    pub rel_path: String,
+    pub full_path: std::path::PathBuf,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified: Option<String>,
+    pub extension: Option<String>,
 }
 
 // Err on any unreadable entry — never reconcile against a partial walk, or a
 // transiently-unreadable subtree reads as a mass delete. Err rolls back the tx.
-fn walk_disk(root: &Path) -> Result<Vec<DiskEntry>, String> {
+pub fn walk_disk(root: &Path) -> Result<Vec<DiskEntry>, String> {
     let mut entries = Vec::new();
 
     for entry in WalkDir::new(root)
@@ -90,7 +90,41 @@ fn path_depth(path: &str) -> usize {
     path.chars().filter(|&c| c == '/' || c == '\\').count()
 }
 
-pub fn preview_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<UpdatePreview, String> {
+fn guard_vanished_root(disk_entries: &[DiskEntry], db_len: usize) -> Result<(), String> {
+    if disk_entries.is_empty() && db_len > 0 {
+        return Err(
+            "Root path is empty — is the drive mounted? Refusing to wipe the catalog.".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn flipped_ids(db_map: &HashMap<String, FileEntry>, disk_entries: &[DiskEntry]) -> Vec<i64> {
+    disk_entries
+        .iter()
+        .filter_map(|d| db_map.get(&d.rel_path).filter(|e| e.is_dir != d.is_dir))
+        .map(|e| e.id)
+        .collect()
+}
+
+fn collect_type_flipped(
+    conn: &Connection,
+    catalog_id: i64,
+    db_map: &HashMap<String, FileEntry>,
+    disk_entries: &[DiskEntry],
+) -> Result<Vec<i64>, String> {
+    let roots = flipped_ids(db_map, disk_entries);
+    if roots.is_empty() {
+        return Ok(Vec::new());
+    }
+    collect_descendant_ids(conn, catalog_id, &roots).map_err(|e| e.to_string())
+}
+
+pub fn preview_update(
+    conn: &Connection,
+    catalog_id: i64,
+    root: &Path,
+) -> Result<UpdatePreview, String> {
     let db_entries = get_all_entries(conn, catalog_id).map_err(|e| e.to_string())?;
     let mut db_map: HashMap<String, &FileEntry> = HashMap::new();
     for entry in &db_entries {
@@ -98,6 +132,7 @@ pub fn preview_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result
     }
 
     let disk_entries = walk_disk(root)?;
+    guard_vanished_root(&disk_entries, db_map.len())?;
 
     let mut added: u64 = 0;
     let mut updated: u64 = 0;
@@ -105,11 +140,23 @@ pub fn preview_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result
     let mut tags_to_backfill: u64 = 0;
     let mut seen_paths: HashSet<String> = HashSet::new();
 
+    let flipped: HashSet<String> = disk_entries
+        .iter()
+        .filter(|d| {
+            db_map
+                .get(&d.rel_path)
+                .is_some_and(|e| e.is_dir != d.is_dir)
+        })
+        .map(|d| d.rel_path.clone())
+        .collect();
+
     for disk in &disk_entries {
         seen_paths.insert(disk.rel_path.clone());
         match db_map.get(&disk.rel_path) {
-            Some(db_entry) => {
-                if !disk.is_dir && (db_entry.size != disk.size || db_entry.modified != disk.modified) {
+            Some(db_entry) if !flipped.contains(&disk.rel_path) => {
+                if !disk.is_dir
+                    && (db_entry.size != disk.size || db_entry.modified != disk.modified)
+                {
                     updated += 1;
                 } else {
                     if !disk.is_dir && is_media_file(disk.extension.as_deref()) {
@@ -123,7 +170,7 @@ pub fn preview_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result
                     unchanged += 1;
                 }
             }
-            None => {
+            _ => {
                 added += 1;
                 if !disk.is_dir && is_media_file(disk.extension.as_deref()) {
                     tags_to_backfill += 1;
@@ -135,7 +182,7 @@ pub fn preview_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result
     let mut deleted_files: u64 = 0;
     let mut deleted_folders: u64 = 0;
     for entry in &db_entries {
-        if !seen_paths.contains(&entry.path) {
+        if !seen_paths.contains(&entry.path) || flipped.contains(&entry.path) {
             if entry.is_dir {
                 deleted_folders += 1;
             } else {
@@ -154,7 +201,11 @@ pub fn preview_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result
     })
 }
 
-pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<UpdatePreview, String> {
+pub fn apply_update(
+    conn: &Connection,
+    catalog_id: i64,
+    root: &Path,
+) -> Result<UpdatePreview, String> {
     let db_entries = get_all_entries(conn, catalog_id).map_err(|e| e.to_string())?;
     let mut db_map: HashMap<String, FileEntry> = HashMap::new();
     for entry in db_entries {
@@ -162,12 +213,29 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
     }
 
     let disk_entries = walk_disk(root)?;
+    guard_vanished_root(&disk_entries, db_map.len())?;
 
     let mut added: u64 = 0;
     let mut updated: u64 = 0;
     let mut unchanged: u64 = 0;
     let mut tags_backfilled: u64 = 0;
+    let mut deleted_files: u64 = 0;
+    let mut deleted_folders: u64 = 0;
     let mut seen_paths: HashSet<String> = HashSet::new();
+
+    let stale = collect_type_flipped(conn, catalog_id, &db_map, &disk_entries)?;
+    if !stale.is_empty() {
+        delete_file_entries_by_ids(conn, catalog_id, &stale).map_err(|e| e.to_string())?;
+        let stale: HashSet<i64> = stale.into_iter().collect();
+        for entry in db_map.values().filter(|e| stale.contains(&e.id)) {
+            if entry.is_dir {
+                deleted_folders += 1;
+            } else {
+                deleted_files += 1;
+            }
+        }
+        db_map.retain(|_, e| !stale.contains(&e.id));
+    }
 
     let mut path_to_id: HashMap<String, i64> = HashMap::new();
     for (path, entry) in &db_map {
@@ -186,7 +254,9 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
         match db_map.get(&disk.rel_path) {
             Some(db_entry) => {
                 path_to_id.insert(disk.rel_path.clone(), db_entry.id);
-                if !disk.is_dir && (db_entry.size != disk.size || db_entry.modified != disk.modified) {
+                if !disk.is_dir
+                    && (db_entry.size != disk.size || db_entry.modified != disk.modified)
+                {
                     update_file_entry_metadata(
                         conn,
                         db_entry.id,
@@ -205,8 +275,7 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
                         let has_tags = get_media_tags(conn, db_entry.id)
                             .map(|t| t.is_some())
                             .unwrap_or(false);
-                        if !has_tags
-                            && extract_and_store_tags(conn, db_entry.id, &disk.full_path)?
+                        if !has_tags && extract_and_store_tags(conn, db_entry.id, &disk.full_path)?
                         {
                             tags_backfilled += 1;
                         }
@@ -228,7 +297,8 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
                 )
                 .map_err(|e| e.to_string())?;
                 path_to_id.insert(disk.rel_path.clone(), entry_id);
-                if !disk.is_dir && is_media_file(disk.extension.as_deref())
+                if !disk.is_dir
+                    && is_media_file(disk.extension.as_deref())
                     && extract_and_store_tags(conn, entry_id, &disk.full_path)?
                 {
                     tags_backfilled += 1;
@@ -238,8 +308,6 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
         }
     }
 
-    let mut deleted_files: u64 = 0;
-    let mut deleted_folders: u64 = 0;
     let mut to_delete: Vec<&FileEntry> = Vec::new();
 
     for (path, entry) in &db_map {
@@ -259,7 +327,7 @@ pub fn apply_update(conn: &Connection, catalog_id: i64, root: &Path) -> Result<U
     let ids_to_delete: Vec<i64> = to_delete.iter().map(|e| e.id).collect();
 
     if !ids_to_delete.is_empty() {
-        delete_file_entries_by_ids(conn, &ids_to_delete).map_err(|e| e.to_string())?;
+        delete_file_entries_by_ids(conn, catalog_id, &ids_to_delete).map_err(|e| e.to_string())?;
     }
 
     // Totals from the rows, not the disk-walk tally, so a mid-scan hiccup can't
@@ -297,8 +365,10 @@ mod tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let path = std::env::temp_dir()
-                .join(format!("kathaloq-test-{tag}-{}-{nanos}", std::process::id()));
+            let path = std::env::temp_dir().join(format!(
+                "kathaloq-test-{tag}-{}-{nanos}",
+                std::process::id()
+            ));
             std::fs::create_dir_all(&path).unwrap();
             TempDir { path }
         }
@@ -338,7 +408,11 @@ mod tests {
 
         let entries = get_all_entries(&c, cat).unwrap();
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(entries.len(), 3, "root.txt, sub, sub/a.txt; .hidden skipped");
+        assert_eq!(
+            entries.len(),
+            3,
+            "root.txt, sub, sub/a.txt; .hidden skipped"
+        );
         assert!(!names.contains(&".hidden"));
 
         let sub = entries.iter().find(|e| e.name == "sub").unwrap();
@@ -425,7 +499,11 @@ mod tests {
         let c = conn();
         let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
         scan_directory(&c, cat, &tmp.path).unwrap();
-        assert_eq!(get_all_entries(&c, cat).unwrap().len(), 2, "old, old/file.txt");
+        assert_eq!(
+            get_all_entries(&c, cat).unwrap().len(),
+            2,
+            "old, old/file.txt"
+        );
 
         std::fs::rename(tmp.path.join("old"), tmp.path.join("new")).unwrap();
 
@@ -436,10 +514,17 @@ mod tests {
 
         let entries = get_all_entries(&c, cat).unwrap();
         assert_eq!(entries.len(), 2);
-        assert!(entries.iter().all(|e| !e.path.starts_with("old")), "old path gone");
+        assert!(
+            entries.iter().all(|e| !e.path.starts_with("old")),
+            "old path gone"
+        );
         let new_dir = entries.iter().find(|e| e.name == "new").unwrap();
         let child = entries.iter().find(|e| e.name == "file.txt").unwrap();
-        assert_eq!(child.parent_id, Some(new_dir.id), "child re-parented under new dir");
+        assert_eq!(
+            child.parent_id,
+            Some(new_dir.id),
+            "child re-parented under new dir"
+        );
     }
 
     #[test]
@@ -463,7 +548,11 @@ mod tests {
         assert_eq!(preview.unchanged, before as u64, "every entry unchanged");
 
         let stats_after = get_catalog_by_id(&c, cat).unwrap();
-        assert_eq!(get_all_entries(&c, cat).unwrap().len(), before, "row count stable");
+        assert_eq!(
+            get_all_entries(&c, cat).unwrap().len(),
+            before,
+            "row count stable"
+        );
         assert_eq!(stats_after.total_files, stats_before.total_files);
         assert_eq!(stats_after.total_size, stats_before.total_size);
     }
@@ -484,7 +573,80 @@ mod tests {
         assert_eq!(preview.added, 1);
         assert_eq!(preview.deleted_files, 0);
 
-        // DB untouched by a preview.
         assert_eq!(get_all_entries(&c, cat).unwrap().len(), before);
+    }
+
+    #[test]
+    fn empty_root_refuses_instead_of_wiping_the_catalog() {
+        let tmp = TempDir::new("unmounted");
+        write(&tmp.path, "music/a.mp3", b"x");
+        write(&tmp.path, "music/b.mp3", b"y");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+        let before = get_all_entries(&c, cat).unwrap().len();
+        assert!(before > 0);
+
+        std::fs::remove_dir_all(tmp.path.join("music")).unwrap();
+
+        let err = preview_update(&c, cat, &tmp.path).unwrap_err();
+        assert!(err.contains("drive mounted"), "got: {err}");
+        let err = apply_update(&c, cat, &tmp.path).unwrap_err();
+        assert!(err.contains("drive mounted"), "got: {err}");
+
+        assert_eq!(
+            get_all_entries(&c, cat).unwrap().len(),
+            before,
+            "an empty root must not delete a single row"
+        );
+    }
+
+    #[test]
+    fn file_replaced_by_directory_is_reindexed_with_the_right_type() {
+        let tmp = TempDir::new("flip");
+        write(&tmp.path, "Live", b"was a file");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+        assert!(!get_all_entries(&c, cat).unwrap()[0].is_dir);
+
+        std::fs::remove_file(tmp.path.join("Live")).unwrap();
+        write(&tmp.path, "Live/track.mp3", b"audio");
+
+        apply_update(&c, cat, &tmp.path).unwrap();
+
+        let entries = get_all_entries(&c, cat).unwrap();
+        let live = entries.iter().find(|e| e.path == "Live").unwrap();
+        let track = entries.iter().find(|e| e.name == "track.mp3").unwrap();
+        assert!(live.is_dir, "row must flip to a directory");
+        assert_eq!(
+            track.parent_id,
+            Some(live.id),
+            "children must hang off the reinserted directory"
+        );
+    }
+
+    #[test]
+    fn directory_replaced_by_file_drops_its_stale_subtree() {
+        let tmp = TempDir::new("flipback");
+        write(&tmp.path, "Mixes/one.mp3", b"a");
+        write(&tmp.path, "Mixes/two.mp3", b"bb");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+
+        std::fs::remove_dir_all(tmp.path.join("Mixes")).unwrap();
+        write(&tmp.path, "Mixes", b"now a file");
+
+        apply_update(&c, cat, &tmp.path).unwrap();
+
+        let entries = get_all_entries(&c, cat).unwrap();
+        assert_eq!(entries.len(), 1, "the old children must be gone");
+        assert!(!entries[0].is_dir);
+        assert_eq!(entries[0].size, 10);
+        assert_eq!(get_catalog_by_id(&c, cat).unwrap().total_size, 10);
     }
 }

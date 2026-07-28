@@ -24,12 +24,6 @@ pub struct FileEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanProgress {
-    pub files_scanned: u64,
-    pub current_path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaTags {
     pub id: i64,
     pub file_entry_id: i64,

@@ -2,30 +2,33 @@ import { describe, it, expect } from "vitest";
 import { formatSize, formatDate, getFileColor } from "./format";
 
 describe("formatSize", () => {
-  it("returns dash for zero", () => {
-    expect(formatSize(0)).toBe("—");
+  it("distinguishes an empty file from a missing value", () => {
+    expect(formatSize(0)).toBe("0 B");
+    expect(formatSize(null)).toBe("—");
+    expect(formatSize(undefined)).toBe("—");
+    expect(formatSize(-1)).toBe("—");
   });
 
   it("formats bytes", () => {
     expect(formatSize(500)).toBe("500 B");
   });
 
-  it("formats kilobytes", () => {
-    expect(formatSize(1024)).toBe("1.0 KB");
-    expect(formatSize(1536)).toBe("1.5 KB");
+  it("matches Finder's decimal units", () => {
+    expect(formatSize(1000)).toBe("1.0 KB");
+    expect(formatSize(1500)).toBe("1.5 KB");
+    expect(formatSize(1_000_000)).toBe("1.0 MB");
+    expect(formatSize(1_000_000_000)).toBe("1.0 GB");
+    expect(formatSize(2_000_000_000_000)).toBe("2.0 TB");
   });
 
-  it("formats megabytes", () => {
-    expect(formatSize(1048576)).toBe("1.0 MB");
+  it("rolls up to the next unit instead of printing 1000.0", () => {
+    expect(formatSize(999)).toBe("999 B");
+    expect(formatSize(999_999)).toBe("1.0 MB");
+    expect(formatSize(999_999_999)).toBe("1.0 GB");
   });
 
-  it("handles unit-boundary seams", () => {
-    expect(formatSize(1023)).toBe("1023 B"); // just under 1 KB stays in bytes
-    expect(formatSize(1048575)).toBe("1024.0 KB"); // just under 1 MB stays in KB
-  });
-
-  it("formats gigabytes", () => {
-    expect(formatSize(1073741824)).toBe("1.0 GB");
+  it("caps at the largest unit", () => {
+    expect(formatSize(5_000_000_000_000_000)).toBe("5000.0 TB");
   });
 });
 
