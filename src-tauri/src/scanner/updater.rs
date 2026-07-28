@@ -154,9 +154,7 @@ pub fn preview_update(
         seen_paths.insert(disk.rel_path.clone());
         match db_map.get(&disk.rel_path) {
             Some(db_entry) if !flipped.contains(&disk.rel_path) => {
-                if !disk.is_dir
-                    && (db_entry.size != disk.size || db_entry.modified != disk.modified)
-                {
+                if db_entry.size != disk.size || db_entry.modified != disk.modified {
                     updated += 1;
                 } else {
                     if !disk.is_dir && is_media_file(disk.extension.as_deref()) {
@@ -254,9 +252,7 @@ pub fn apply_update(
         match db_map.get(&disk.rel_path) {
             Some(db_entry) => {
                 path_to_id.insert(disk.rel_path.clone(), db_entry.id);
-                if !disk.is_dir
-                    && (db_entry.size != disk.size || db_entry.modified != disk.modified)
-                {
+                if db_entry.size != disk.size || db_entry.modified != disk.modified {
                     update_file_entry_metadata(
                         conn,
                         db_entry.id,
@@ -264,7 +260,8 @@ pub fn apply_update(
                         disk.modified.as_deref(),
                     )
                     .map_err(|e| e.to_string())?;
-                    if is_media_file(disk.extension.as_deref())
+                    if !disk.is_dir
+                        && is_media_file(disk.extension.as_deref())
                         && extract_and_store_tags(conn, db_entry.id, &disk.full_path)?
                     {
                         tags_backfilled += 1;
@@ -443,10 +440,10 @@ mod tests {
 
         let preview = apply_update(&c, cat, &tmp.path).unwrap();
         assert_eq!(preview.added, 1, "new.txt");
-        assert_eq!(preview.updated, 1, "change.txt");
+        assert_eq!(preview.updated, 2, "change.txt + sub, whose mtime moved");
         assert_eq!(preview.deleted_files, 1, "del.txt");
         assert_eq!(preview.deleted_folders, 0);
-        assert_eq!(preview.unchanged, 2, "keep.txt + sub dir");
+        assert_eq!(preview.unchanged, 1, "keep.txt");
 
         let entries = get_all_entries(&c, cat).unwrap();
         assert_eq!(entries.len(), 4, "keep, change, sub, new");
@@ -574,6 +571,36 @@ mod tests {
         assert_eq!(preview.deleted_files, 0);
 
         assert_eq!(get_all_entries(&c, cat).unwrap().len(), before);
+    }
+
+    #[test]
+    fn directory_mtime_changes_are_written_back() {
+        let tmp = TempDir::new("dirmtime");
+        write(&tmp.path, "sub/one.txt", b"A");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+        let before = get_all_entries(&c, cat)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.name == "sub")
+            .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        write(&tmp.path, "sub/two.txt", b"B");
+        apply_update(&c, cat, &tmp.path).unwrap();
+
+        let after = get_all_entries(&c, cat)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.name == "sub")
+            .unwrap();
+        assert_ne!(
+            before.modified, after.modified,
+            "a folder touched after import must not keep its first-scan timestamp"
+        );
+        assert_eq!(after.size, 0, "folders stay sizeless");
     }
 
     #[test]

@@ -47,6 +47,12 @@ pub struct FolderStats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub hits: Vec<FileEntry>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdatePreview {
     pub added: u64,
     pub updated: u64,

@@ -7,6 +7,7 @@ export const currentFiles = writable<FileEntry[]>([]);
 export const breadcrumbs = writable<BreadcrumbItem[]>([]);
 export const isLoading = writable(false);
 export const searchQuery = writable("");
+export const searchTruncated = writable(false);
 export const mediaFilter = writable<MediaFilter>(null);
 
 // Bumped on any backend mutation (add/update/remove/delete) so cached views —

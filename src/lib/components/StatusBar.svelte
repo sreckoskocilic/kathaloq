@@ -1,6 +1,6 @@
 <script lang="ts">
   import { afterUpdate } from "svelte";
-  import { activeCatalog, currentFiles, catalogVersion } from "../stores/catalog";
+  import { activeCatalog, currentFiles, catalogVersion, searchTruncated } from "../stores/catalog";
   import { theme } from "../stores/theme";
   import { formatSize } from "../services/format";
   import { notifyError } from "../stores/notify";
@@ -57,6 +57,10 @@
       <span class="stat">{folderCount} folders</span>
       <span class="sep">·</span>
       <span class="stat">{fileCount} files</span>
+      {#if $searchTruncated}
+        <span class="sep">·</span>
+        <span class="stat truncated">first {fileCount + folderCount} matches only</span>
+      {/if}
       <span class="sep">·</span>
       <span class="stat">{$activeCatalog.name}: {formatSize($activeCatalog.total_size)}</span>
     {:else}
@@ -99,6 +103,10 @@
 
   .stat.highlight {
     color: var(--accent);
+  }
+
+  .stat.truncated {
+    color: var(--danger, #d45555);
   }
 
   .stat.muted {

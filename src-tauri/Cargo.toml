@@ -2,6 +2,7 @@
 name = "kathaloq"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT"
 
 [lib]
@@ -21,3 +22,8 @@ chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["rt"] }
 lofty = "0.22"
 unicode-normalization = "0.1.25"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

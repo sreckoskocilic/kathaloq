@@ -17,6 +17,7 @@
     breadcrumbs,
     isLoading,
     searchQuery,
+    searchTruncated,
     mediaFilter,
     activeCatalog,
     bumpCatalogVersion,
@@ -120,7 +121,10 @@
       const files = filter
         ? await api.getChildrenFiltered(catalogId, parentId, filter)
         : await api.getChildren(catalogId, parentId);
-      if (thisRequest === requestId) $currentFiles = files;
+      if (thisRequest === requestId) {
+        $currentFiles = files;
+        $searchTruncated = false;
+      }
     } catch (e) {
       if (thisRequest === requestId) $currentFiles = [];
       notifyError("Failed to load files", e);
@@ -130,10 +134,16 @@
   async function performSearch(catalogId: number, query: string) {
     const thisRequest = ++requestId;
     try {
-      const files = await api.searchFiles(catalogId, query);
-      if (thisRequest === requestId) $currentFiles = files;
+      const result = await api.searchFiles(catalogId, query);
+      if (thisRequest === requestId) {
+        $currentFiles = result.hits;
+        $searchTruncated = result.truncated;
+      }
     } catch (e) {
-      if (thisRequest === requestId) $currentFiles = [];
+      if (thisRequest === requestId) {
+        $currentFiles = [];
+        $searchTruncated = false;
+      }
       notifyError("Search failed", e);
     }
   }

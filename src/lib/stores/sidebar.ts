@@ -17,7 +17,14 @@ const EMPTY: SidebarState = {
 };
 
 function isBreadcrumbPath(v: unknown): v is BreadcrumbItem[] {
-  return Array.isArray(v) && v.every((x) => x && typeof x === "object" && "id" in x && "name" in x);
+  return (
+    Array.isArray(v) &&
+    v.every((x) => {
+      if (!x || typeof x !== "object") return false;
+      const item = x as Record<string, unknown>;
+      return (typeof item.id === "number" || item.id === null) && typeof item.name === "string";
+    })
+  );
 }
 
 function getInitial(): SidebarState {
@@ -30,7 +37,7 @@ function getInitial(): SidebarState {
       const parsed = JSON.parse(raw);
       return {
         expandedCatalogIds: Array.isArray(parsed.expandedCatalogIds)
-          ? parsed.expandedCatalogIds
+          ? parsed.expandedCatalogIds.filter((id: unknown) => typeof id === "number")
           : [],
         activeCatalogId: typeof parsed.activeCatalogId === "number" ? parsed.activeCatalogId : null,
         selectedFolderPath: isBreadcrumbPath(parsed.selectedFolderPath)

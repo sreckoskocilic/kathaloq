@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use rusqlite::{Connection, params};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::models::{Catalog, FileEntry, FolderStats, MediaTags};
+use crate::models::{Catalog, FileEntry, FolderStats, MediaTags, SearchResult};
 
 pub fn search_key(value: &str) -> String {
     value
@@ -18,6 +18,8 @@ pub fn search_key(value: &str) -> String {
 const MAX_TREE_DEPTH: u32 = 100;
 
 const MAX_SQL_PARAMS: usize = 30_000;
+
+const SEARCH_LIMIT: i64 = 500;
 
 pub fn insert_catalog(
     conn: &Connection,
@@ -119,7 +121,7 @@ pub fn search_files(
     conn: &Connection,
     catalog_id: i64,
     query: &str,
-) -> rusqlite::Result<Vec<FileEntry>> {
+) -> rusqlite::Result<SearchResult> {
     let escaped = search_key(query)
         .replace('\\', "\\\\")
         .replace('%', "\\%")
@@ -128,10 +130,16 @@ pub fn search_files(
     let mut stmt = conn.prepare(
         "SELECT id, catalog_id, parent_id, name, path, is_dir, size, modified, extension
          FROM file_entries WHERE catalog_id = ?1 AND name_lower LIKE ?2 ESCAPE '\\'
-         ORDER BY is_dir DESC, name_lower ASC LIMIT 500",
+         ORDER BY is_dir DESC, name_lower ASC LIMIT ?3",
     )?;
-    let rows = stmt.query_map(params![catalog_id, pattern], map_file_entry)?;
-    rows.collect()
+    let rows = stmt.query_map(
+        params![catalog_id, pattern, SEARCH_LIMIT + 1],
+        map_file_entry,
+    )?;
+    let mut hits: Vec<FileEntry> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    let truncated = hits.len() > SEARCH_LIMIT as usize;
+    hits.truncate(SEARCH_LIMIT as usize);
+    Ok(SearchResult { hits, truncated })
 }
 
 pub fn get_ancestors(
@@ -657,14 +665,14 @@ mod tests {
 
         for query in ["Mišak", "mišak", "Krešimir", "piše"] {
             assert_eq!(
-                search_files(&c, cat, query).unwrap().len(),
+                search_files(&c, cat, query).unwrap().hits.len(),
                 1,
                 "composed query {query:?} must match a decomposed filename"
             );
         }
 
-        assert_eq!(search_files(&c, cat, "Mis\u{30c}ak").unwrap().len(), 1);
-        assert_eq!(search_files(&c, cat, "Misak").unwrap().len(), 0);
+        assert_eq!(search_files(&c, cat, "Mis\u{30c}ak").unwrap().hits.len(), 1);
+        assert_eq!(search_files(&c, cat, "Misak").unwrap().hits.len(), 0);
     }
 
     #[test]
@@ -678,12 +686,12 @@ mod tests {
         )
         .unwrap();
         c.execute_batch("PRAGMA user_version = 0;").unwrap();
-        assert_eq!(search_files(&c, cat, "Mišak").unwrap().len(), 0);
+        assert_eq!(search_files(&c, cat, "Mišak").unwrap().hits.len(), 0);
 
         run_migrations(&c).unwrap();
 
         assert_eq!(
-            search_files(&c, cat, "Mišak").unwrap().len(),
+            search_files(&c, cat, "Mišak").unwrap().hits.len(),
             1,
             "an existing catalog must be re-folded on startup"
         );
@@ -698,14 +706,14 @@ mod tests {
         file(&c, cat, None, "Zebra.mp3", 1, "mp3");
 
         for query in ["žuti", "ŽUTI", "Žuti"] {
-            let hits = search_files(&c, cat, query).unwrap();
+            let hits = search_files(&c, cat, query).unwrap().hits;
             assert_eq!(hits.len(), 1, "query {query:?} must match Žuti pas.mp3");
             assert_eq!(hits[0].name, "Žuti pas.mp3");
         }
 
-        assert_eq!(search_files(&c, cat, "ČAŠA").unwrap().len(), 1);
-        assert_eq!(search_files(&c, cat, "zebra").unwrap().len(), 1);
-        assert_eq!(search_files(&c, cat, "đ").unwrap().len(), 0);
+        assert_eq!(search_files(&c, cat, "ČAŠA").unwrap().hits.len(), 1);
+        assert_eq!(search_files(&c, cat, "zebra").unwrap().hits.len(), 1);
+        assert_eq!(search_files(&c, cat, "đ").unwrap().hits.len(), 0);
     }
 
     #[test]
@@ -718,12 +726,12 @@ mod tests {
             params![id],
         )
         .unwrap();
-        assert_eq!(search_files(&c, cat, "žuti").unwrap().len(), 0);
+        assert_eq!(search_files(&c, cat, "žuti").unwrap().hits.len(), 0);
 
         run_migrations(&c).unwrap();
 
         assert_eq!(
-            search_files(&c, cat, "žuti").unwrap().len(),
+            search_files(&c, cat, "žuti").unwrap().hits.len(),
             1,
             "rows written before the column existed must be folded on startup"
         );
@@ -861,6 +869,7 @@ mod tests {
 
         let hits: Vec<String> = search_files(&c, cat, "100%")
             .unwrap()
+            .hits
             .into_iter()
             .map(|e| e.name)
             .collect();
@@ -873,7 +882,7 @@ mod tests {
         let cat1 = catalog(&c);
         let cat2 = insert_catalog(&c, "other", "/o", "2026-01-01T00:00:00Z").unwrap();
         file(&c, cat2, None, "secret.txt", 1, "txt");
-        assert!(search_files(&c, cat1, "secret").unwrap().is_empty());
+        assert!(search_files(&c, cat1, "secret").unwrap().hits.is_empty());
     }
 
     #[test]
@@ -886,6 +895,7 @@ mod tests {
 
         let hits: Vec<String> = search_files(&c, cat, "a_b")
             .unwrap()
+            .hits
             .into_iter()
             .map(|e| e.name)
             .collect();

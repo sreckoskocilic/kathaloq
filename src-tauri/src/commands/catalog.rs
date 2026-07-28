@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::db::{self, Database};
-use crate::models::{Catalog, FileEntry, FolderStats, MediaTags};
+use crate::models::{Catalog, FileEntry, FolderStats, MediaTags, SearchResult};
 
 // All query commands are async + spawn_blocking so the SQLite work runs off the
 // main thread. A synchronous #[tauri::command] runs on Tauri's main thread and
@@ -65,7 +65,7 @@ pub async fn search_files(
     db: State<'_, Database>,
     catalog_id: i64,
     query: String,
-) -> Result<Vec<FileEntry>, String> {
+) -> Result<SearchResult, String> {
     let db = db.inner().clone();
     tokio::task::spawn_blocking(move || {
         db.with_read_conn(|conn| db::search_files(conn, catalog_id, &query))

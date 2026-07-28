@@ -16,8 +16,10 @@ updates:
       npm-deps:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    # svelte-check and typescript-eslint still cap at typescript <6.1, so a TS 7
+    # bump breaks `npm run check` and `npm run lint`.
     ignore:
-      - dependency-name: "*"
+      - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: cargo
@@ -28,6 +30,3 @@ updates:
       cargo-deps:
         patterns: ["*"]
         update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]

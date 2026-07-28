@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Catalog, FileEntry, FolderStats, MediaTags, UpdatePreview } from "../types";
+import type {
+  Catalog,
+  FileEntry,
+  FolderStats,
+  MediaTags,
+  SearchResult,
+  UpdatePreview,
+} from "../types";
 
 export async function startScan(path: string, name: string): Promise<number> {
   return invoke<number>("start_scan", { path, name });
@@ -24,8 +31,8 @@ export async function getAncestors(catalogId: number, entryId: number): Promise<
   return invoke<FileEntry[]>("get_ancestors", { catalogId, entryId });
 }
 
-export async function searchFiles(catalogId: number, query: string): Promise<FileEntry[]> {
-  return invoke<FileEntry[]>("search_files", { catalogId, query });
+export async function searchFiles(catalogId: number, query: string): Promise<SearchResult> {
+  return invoke<SearchResult>("search_files", { catalogId, query });
 }
 
 export async function previewCatalogUpdate(catalogId: number): Promise<UpdatePreview> {

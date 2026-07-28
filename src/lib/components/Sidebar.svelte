@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { catalogs, activeCatalogId, catalogVersion } from "../stores/catalog";
   import { sidebarState } from "../stores/sidebar";
-  import { getChildren } from "../services/tauri";
+  import { getAncestors, getChildren } from "../services/tauri";
   import { notifyError } from "../stores/notify";
   import { SvelteSet, SvelteMap } from "svelte/reactivity";
   import TreeNode from "./TreeNode.svelte";
@@ -25,26 +25,66 @@
   $: selectedFolderId =
     selectedFolderPath.length > 0 ? selectedFolderPath[selectedFolderPath.length - 1].id : null;
 
+  let restoreAttempted = false;
+
   $: if (
     $catalogs.length > 0 &&
     $activeCatalogId === null &&
-    $sidebarState.activeCatalogId !== null
+    $sidebarState.activeCatalogId !== null &&
+    !restoreAttempted
   ) {
-    const exists = $catalogs.find((c) => c.id === $sidebarState.activeCatalogId);
-    if (exists) {
-      activeCatalogId.set($sidebarState.activeCatalogId);
-      const path = $sidebarState.selectedFolderPath;
-      const last = path[path.length - 1];
-      if (last && last.id !== null) {
-        onSelectFolder($sidebarState.activeCatalogId, { id: last.id, name: last.name }, path);
-      } else {
-        onSelectFolder($sidebarState.activeCatalogId, null);
-      }
+    restoreAttempted = true;
+    const stored = $sidebarState.activeCatalogId;
+    if ($catalogs.some((c) => c.id === stored)) {
+      restoreSelection(stored);
     }
   }
 
   $: if ($catalogs.length > 0) {
+    pruneDeadCatalogs();
     restoreExpandedFolders();
+  }
+
+  async function restoreSelection(catalogId: number) {
+    activeCatalogId.set(catalogId);
+    const stored = $sidebarState.selectedFolderPath;
+    const last = stored[stored.length - 1];
+    if (!last || last.id === null) {
+      onSelectFolder(catalogId, null);
+      return;
+    }
+
+    let chain: FileEntry[] = [];
+    try {
+      chain = await getAncestors(catalogId, last.id);
+    } catch (e) {
+      notifyError("Failed to restore last folder", e);
+    }
+
+    if (chain.length === 0) {
+      selectedFolderPath = [];
+      persistState();
+      onSelectFolder(catalogId, null);
+      return;
+    }
+
+    const fresh = chain.map((e) => ({ id: e.id, name: e.name }));
+    const leaf = chain[chain.length - 1];
+    selectedFolderPath = fresh;
+    persistState();
+    onSelectFolder(catalogId, { id: leaf.id, name: leaf.name }, fresh);
+  }
+
+  function pruneDeadCatalogs() {
+    const live = new Set($catalogs.map((c) => c.id));
+    const dead = [...expandedCatalogs].filter((id) => !live.has(id));
+    if (dead.length === 0) return;
+    for (const id of dead) expandedCatalogs.delete(id);
+    expandedCatalogs = expandedCatalogs;
+    sidebarState.update((s) => ({
+      ...s,
+      expandedCatalogIds: [...expandedCatalogs],
+    }));
   }
 
   // Drop the cached folder tree on any catalog mutation.

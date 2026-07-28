@@ -58,6 +58,11 @@ export interface FolderStats {
   total_size: number;
 }
 
+export interface SearchResult {
+  hits: FileEntry[];
+  truncated: boolean;
+}
+
 export interface UpdatePreview {
   added: number;
   updated: number;
