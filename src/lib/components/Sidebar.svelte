@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { catalogs, activeCatalogId, catalogVersion } from "../stores/catalog";
+  import { get } from "svelte/store";
+  import { catalogs, activeCatalogId, catalogVersion, breadcrumbs } from "../stores/catalog";
   import { sidebarState } from "../stores/sidebar";
   import { getAncestors, getChildren } from "../services/tauri";
   import { notifyError } from "../stores/notify";
@@ -21,24 +22,10 @@
 
   let expandedCatalogs: SvelteSet<number> = new SvelteSet($sidebarState.expandedCatalogIds);
   let rootFolders: SvelteMap<number, FileEntry[]> = new SvelteMap();
-  let selectedFolderPath: BreadcrumbItem[] = $sidebarState.selectedFolderPath;
-  $: selectedFolderId =
-    selectedFolderPath.length > 0 ? selectedFolderPath[selectedFolderPath.length - 1].id : null;
+  $: selectedFolderId = $breadcrumbs.length > 0 ? $breadcrumbs[$breadcrumbs.length - 1].id : null;
 
   let restoreAttempted = false;
-
-  $: if (
-    $catalogs.length > 0 &&
-    $activeCatalogId === null &&
-    $sidebarState.activeCatalogId !== null &&
-    !restoreAttempted
-  ) {
-    restoreAttempted = true;
-    const stored = $sidebarState.activeCatalogId;
-    if ($catalogs.some((c) => c.id === stored)) {
-      restoreSelection(stored);
-    }
-  }
+  let restoreSettled = false;
 
   $: if ($catalogs.length > 0) {
     pruneDeadCatalogs();
@@ -50,6 +37,7 @@
     const stored = $sidebarState.selectedFolderPath;
     const last = stored[stored.length - 1];
     if (!last || last.id === null) {
+      restoreSettled = true;
       onSelectFolder(catalogId, null);
       return;
     }
@@ -62,17 +50,14 @@
     }
 
     if (chain.length === 0) {
-      selectedFolderPath = [];
-      persistState();
       onSelectFolder(catalogId, null);
-      return;
+    } else {
+      const fresh = chain.map((e) => ({ id: e.id, name: e.name }));
+      const leaf = chain[chain.length - 1];
+      onSelectFolder(catalogId, { id: leaf.id, name: leaf.name }, fresh);
     }
-
-    const fresh = chain.map((e) => ({ id: e.id, name: e.name }));
-    const leaf = chain[chain.length - 1];
-    selectedFolderPath = fresh;
-    persistState();
-    onSelectFolder(catalogId, { id: leaf.id, name: leaf.name }, fresh);
+    restoreSettled = true;
+    persistNavigation();
   }
 
   function pruneDeadCatalogs() {
@@ -90,14 +75,38 @@
   // Drop the cached folder tree on any catalog mutation.
   // Imperative (not $:) so the async refetch isn't flagged a reactive loop.
   let lastVersion = $catalogVersion;
-  onMount(() =>
-    catalogVersion.subscribe((v) => {
-      if (v === lastVersion) return;
-      lastVersion = v;
-      rootFolders = new SvelteMap();
-      restoreExpandedFolders();
-    })
-  );
+  onMount(() => {
+    const unsubs = [
+      catalogs.subscribe((list) => {
+        if (list.length === 0 || restoreAttempted) return;
+        restoreAttempted = true;
+        const stored = get(sidebarState).activeCatalogId;
+        if (stored !== null && get(activeCatalogId) === null && list.some((c) => c.id === stored)) {
+          restoreSelection(stored);
+        } else {
+          restoreSettled = true;
+        }
+      }),
+      catalogVersion.subscribe((v) => {
+        if (v === lastVersion) return;
+        lastVersion = v;
+        rootFolders = new SvelteMap();
+        restoreExpandedFolders();
+      }),
+      activeCatalogId.subscribe(persistNavigation),
+      breadcrumbs.subscribe(persistNavigation),
+    ];
+    return () => unsubs.forEach((u) => u());
+  });
+
+  function persistNavigation() {
+    if (!restoreSettled) return;
+    sidebarState.update((s) => ({
+      ...s,
+      activeCatalogId: get(activeCatalogId),
+      selectedFolderPath: get(breadcrumbs),
+    }));
+  }
 
   async function restoreExpandedFolders() {
     for (const catalogId of expandedCatalogs) {
@@ -118,19 +127,16 @@
     }
   }
 
-  function persistState() {
-    sidebarState.set({
+  function persistExpanded() {
+    sidebarState.update((s) => ({
+      ...s,
       expandedCatalogIds: [...expandedCatalogs],
-      activeCatalogId: $activeCatalogId,
-      selectedFolderPath,
-    });
+    }));
   }
 
   function selectCatalog(catalog: Catalog) {
     activeCatalogId.set(catalog.id);
-    selectedFolderPath = [];
     onSelectFolder(catalog.id, null);
-    persistState();
   }
 
   function sortByName(entries: FileEntry[]): FileEntry[] {
@@ -151,14 +157,12 @@
       expandedCatalogs.add(catalog.id);
       expandedCatalogs = expandedCatalogs;
     }
-    persistState();
+    persistExpanded();
   }
 
   function handleTreeSelect(entry: FileEntry, path: BreadcrumbItem[]) {
     activeCatalogId.set(entry.catalog_id);
-    selectedFolderPath = path;
     onSelectFolder(entry.catalog_id, { id: entry.id, name: entry.name }, path);
-    persistState();
   }
 
   function handleDeleteClick(e: MouseEvent, catalog: Catalog) {

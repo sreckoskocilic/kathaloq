@@ -7,13 +7,18 @@
 
   let searchInput = "";
   let searchTimeout: ReturnType<typeof setTimeout>;
+  let pushedQuery = "";
 
-  $: if ($searchQuery !== searchInput.trim() && $searchQuery === "") searchInput = "";
+  $: if ($searchQuery !== pushedQuery) {
+    pushedQuery = $searchQuery;
+    searchInput = $searchQuery;
+  }
 
   function onSearchInput() {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => {
       if (searchInput) mediaFilter.set(null);
+      pushedQuery = searchInput;
       searchQuery.set(searchInput);
     }, 250);
   }
@@ -29,6 +34,7 @@
     clearTimeout(searchTimeout);
     mediaFilter.set($mediaFilter === type ? null : type);
     searchInput = "";
+    pushedQuery = "";
     searchQuery.set("");
   }
 
