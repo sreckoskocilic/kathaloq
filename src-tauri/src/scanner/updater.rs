@@ -25,9 +25,13 @@ pub struct DiskEntry {
     pub extension: Option<String>,
 }
 
-// Err on any unreadable entry — never reconcile against a partial walk, or a
-// transiently-unreadable subtree reads as a mass delete. Err rolls back the tx.
-pub fn walk_disk(root: &Path) -> Result<Vec<DiskEntry>, String> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum WalkPolicy {
+    Strict,
+    SkipUnreadable,
+}
+
+pub fn walk_disk(root: &Path, policy: WalkPolicy) -> Result<Vec<DiskEntry>, String> {
     let mut entries = Vec::new();
 
     for entry in WalkDir::new(root)
@@ -40,16 +44,30 @@ pub fn walk_disk(root: &Path) -> Result<Vec<DiskEntry>, String> {
             !should_skip(&e.file_name().to_string_lossy())
         })
     {
-        let entry = entry.map_err(|e| format!("Cannot read directory during scan: {e}"))?;
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) if policy == WalkPolicy::SkipUnreadable => {
+                let _ = e;
+                continue;
+            }
+            Err(e) => return Err(format!("Cannot read directory during scan: {e}")),
+        };
         let path = entry.path();
 
         if path == root {
             continue;
         }
 
-        let metadata = entry
-            .metadata()
-            .map_err(|e| format!("Cannot read metadata for {}: {e}", path.display()))?;
+        let metadata = match entry.metadata() {
+            Ok(m) => m,
+            Err(e) if policy == WalkPolicy::SkipUnreadable => {
+                let _ = e;
+                continue;
+            }
+            Err(e) => {
+                return Err(format!("Cannot read metadata for {}: {e}", path.display()));
+            }
+        };
 
         let name = entry.file_name().to_string_lossy().to_string();
         let rel_path = path
@@ -125,14 +143,22 @@ pub fn preview_update(
     catalog_id: i64,
     root: &Path,
 ) -> Result<UpdatePreview, String> {
+    let disk_entries = walk_disk(root, WalkPolicy::Strict)?;
+    preview_update_entries(conn, catalog_id, &disk_entries)
+}
+
+pub fn preview_update_entries(
+    conn: &Connection,
+    catalog_id: i64,
+    disk_entries: &[DiskEntry],
+) -> Result<UpdatePreview, String> {
     let db_entries = get_all_entries(conn, catalog_id).map_err(|e| e.to_string())?;
     let mut db_map: HashMap<String, &FileEntry> = HashMap::new();
     for entry in &db_entries {
         db_map.insert(entry.path.clone(), entry);
     }
 
-    let disk_entries = walk_disk(root)?;
-    guard_vanished_root(&disk_entries, db_map.len())?;
+    guard_vanished_root(disk_entries, db_map.len())?;
 
     let mut added: u64 = 0;
     let mut updated: u64 = 0;
@@ -150,7 +176,7 @@ pub fn preview_update(
         .map(|d| d.rel_path.clone())
         .collect();
 
-    for disk in &disk_entries {
+    for disk in disk_entries {
         seen_paths.insert(disk.rel_path.clone());
         match db_map.get(&disk.rel_path) {
             Some(db_entry) if !flipped.contains(&disk.rel_path) => {
@@ -204,14 +230,22 @@ pub fn apply_update(
     catalog_id: i64,
     root: &Path,
 ) -> Result<UpdatePreview, String> {
+    let disk_entries = walk_disk(root, WalkPolicy::Strict)?;
+    apply_update_entries(conn, catalog_id, &disk_entries)
+}
+
+pub fn apply_update_entries(
+    conn: &Connection,
+    catalog_id: i64,
+    disk_entries: &[DiskEntry],
+) -> Result<UpdatePreview, String> {
     let db_entries = get_all_entries(conn, catalog_id).map_err(|e| e.to_string())?;
     let mut db_map: HashMap<String, FileEntry> = HashMap::new();
     for entry in db_entries {
         db_map.insert(entry.path.clone(), entry);
     }
 
-    let disk_entries = walk_disk(root)?;
-    guard_vanished_root(&disk_entries, db_map.len())?;
+    guard_vanished_root(disk_entries, db_map.len())?;
 
     let mut added: u64 = 0;
     let mut updated: u64 = 0;
@@ -221,7 +255,7 @@ pub fn apply_update(
     let mut deleted_folders: u64 = 0;
     let mut seen_paths: HashSet<String> = HashSet::new();
 
-    let stale = collect_type_flipped(conn, catalog_id, &db_map, &disk_entries)?;
+    let stale = collect_type_flipped(conn, catalog_id, &db_map, disk_entries)?;
     if !stale.is_empty() {
         delete_file_entries_by_ids(conn, catalog_id, &stale).map_err(|e| e.to_string())?;
         let stale: HashSet<i64> = stale.into_iter().collect();
@@ -240,7 +274,7 @@ pub fn apply_update(
         path_to_id.insert(path.clone(), entry.id);
     }
 
-    for disk in &disk_entries {
+    for disk in disk_entries {
         seen_paths.insert(disk.rel_path.clone());
 
         let parent_path = Path::new(&disk.rel_path)
@@ -601,6 +635,32 @@ mod tests {
             "a folder touched after import must not keep its first-scan timestamp"
         );
         assert_eq!(after.size, 0, "folders stay sizeless");
+    }
+
+    #[test]
+    fn initial_scan_indexes_what_it_can_reach_past_an_unreadable_dir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new("perm");
+        write(&tmp.path, "readable/a.txt", b"A");
+        let locked = tmp.path.join("locked");
+        std::fs::create_dir_all(locked.join("inner")).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let lenient = walk_disk(&tmp.path, WalkPolicy::SkipUnreadable);
+        let strict = walk_disk(&tmp.path, WalkPolicy::Strict);
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let lenient = lenient.expect("a first import must survive one unreadable folder");
+        assert!(
+            lenient.iter().any(|e| e.name == "a.txt"),
+            "reachable files must still be indexed"
+        );
+        assert!(
+            strict.is_err(),
+            "reconcile must still refuse a partial walk"
+        );
     }
 
     #[test]

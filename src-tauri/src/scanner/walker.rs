@@ -5,10 +5,10 @@ use rusqlite::Connection;
 
 use crate::db::{insert_file_entry, update_catalog_stats};
 use crate::scanner::media::{extract_and_store_tags, is_media_file};
-use crate::scanner::updater::{DiskEntry, walk_disk};
+use crate::scanner::updater::{DiskEntry, WalkPolicy, walk_disk};
 
 pub fn scan_directory(conn: &Connection, catalog_id: i64, root: &Path) -> Result<(), String> {
-    let entries = walk_disk(root)?;
+    let entries = walk_disk(root, WalkPolicy::SkipUnreadable)?;
     index_entries(conn, catalog_id, &entries)
 }
 

@@ -2,7 +2,10 @@ pub mod media;
 pub mod updater;
 mod walker;
 
-pub use updater::{apply_update, preview_update, walk_disk};
+pub use updater::{
+    WalkPolicy, apply_update, apply_update_entries, preview_update, preview_update_entries,
+    walk_disk,
+};
 pub use walker::{index_entries, scan_directory};
 
 const IGNORED_NAMES: &[&str] = &[

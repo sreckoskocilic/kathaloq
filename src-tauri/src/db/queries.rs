@@ -198,7 +198,7 @@ pub fn collect_descendant_ids(
         for (id, depth) in collect_descendants_chunk(conn, catalog_id, chunk)? {
             depth_by_id
                 .entry(id)
-                .and_modify(|d| *d = (*d).min(depth))
+                .and_modify(|d| *d = (*d).max(depth))
                 .or_insert(depth);
         }
     }
@@ -228,7 +228,7 @@ fn collect_descendants_chunk(
             JOIN descendants d ON fe.parent_id = d.id
             WHERE fe.catalog_id = ?1 AND d.depth < {MAX_TREE_DEPTH}
         )
-        SELECT id, MIN(depth) FROM descendants GROUP BY id ORDER BY MIN(depth)",
+        SELECT id, MAX(depth) FROM descendants GROUP BY id ORDER BY MAX(depth)",
         MAX_TREE_DEPTH = MAX_TREE_DEPTH,
     );
     let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(root_ids.len() + 1);
@@ -735,6 +735,25 @@ mod tests {
             1,
             "rows written before the column existed must be folded on startup"
         );
+    }
+
+    #[test]
+    fn selecting_a_folder_and_its_own_descendant_deletes_fk_safely() {
+        let c = conn();
+        let cat = catalog(&c);
+        let a = dir(&c, cat, None, "A");
+        let b = dir(&c, cat, Some(a), "A/B");
+        let f = file(&c, cat, Some(b), "A/B/c.txt", 1, "txt");
+
+        let ids = collect_descendant_ids(&c, cat, &[a, f]).unwrap();
+        assert_eq!(
+            ids,
+            vec![a, b, f],
+            "a seeded root that is also a descendant must sort after its parent"
+        );
+        delete_file_entries_by_ids(&c, cat, &ids)
+            .expect("reversed delete must not violate the parent_id FK");
+        assert_eq!(get_all_entries(&c, cat).unwrap().len(), 0);
     }
 
     #[test]

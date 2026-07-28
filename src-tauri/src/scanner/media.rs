@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use lofty::error::ErrorKind;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::Accessor;
@@ -32,7 +33,10 @@ pub fn extract_and_store_tags(
 ) -> Result<bool, String> {
     let tagged_file = match Probe::open(file_path).and_then(|p| p.read()) {
         Ok(f) => f,
-        Err(_) => {
+        Err(e) => {
+            if matches!(e.kind(), ErrorKind::Io(_)) {
+                return Ok(false);
+            }
             insert_media_tags(
                 conn,
                 file_entry_id,
