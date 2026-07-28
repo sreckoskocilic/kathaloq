@@ -81,7 +81,7 @@ pub fn extract_and_store_tags(
         artist = tag.artist().map(|s| s.to_string());
         album = tag.album().map(|s| s.to_string());
         genre = tag.genre().map(|s| s.to_string());
-        year = tag.year();
+        year = tag.date().map(|d| u32::from(d.year));
         track_number = tag.track();
     }
 

@@ -20,7 +20,7 @@ rusqlite = { version = "0.34", features = ["bundled"] }
 walkdir = "2"
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["rt"] }
-lofty = "0.22"
+lofty = "0.24"
 unicode-normalization = "0.1.25"
 
 [profile.release]
