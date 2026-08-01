@@ -138,6 +138,120 @@ fn collect_type_flipped(
     collect_descendant_ids(conn, catalog_id, &roots).map_err(|e| e.to_string())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Preview,
+    Apply,
+}
+
+fn is_media_entry(disk: &DiskEntry) -> bool {
+    !disk.is_dir && is_media_file(disk.extension.as_deref())
+}
+
+fn backfill_tags(
+    conn: &Connection,
+    mode: Mode,
+    disk: &DiskEntry,
+    entry_id: i64,
+) -> Result<bool, String> {
+    if !is_media_entry(disk) {
+        return Ok(false);
+    }
+    match mode {
+        Mode::Preview => Ok(true),
+        Mode::Apply => extract_and_store_tags(conn, entry_id, &disk.full_path),
+    }
+}
+
+fn drop_type_flipped(
+    conn: &Connection,
+    catalog_id: i64,
+    db_map: &mut HashMap<String, FileEntry>,
+    disk_entries: &[DiskEntry],
+    mode: Mode,
+) -> Result<(u64, u64), String> {
+    let stale = collect_type_flipped(conn, catalog_id, db_map, disk_entries)?;
+    if stale.is_empty() {
+        return Ok((0, 0));
+    }
+    if mode == Mode::Apply {
+        delete_file_entries_by_ids(conn, catalog_id, &stale).map_err(|e| e.to_string())?;
+    }
+
+    let stale: HashSet<i64> = stale.into_iter().collect();
+    let mut files: u64 = 0;
+    let mut folders: u64 = 0;
+    for entry in db_map.values().filter(|e| stale.contains(&e.id)) {
+        if entry.is_dir {
+            folders += 1;
+        } else {
+            files += 1;
+        }
+    }
+    db_map.retain(|_, e| !stale.contains(&e.id));
+    Ok((files, folders))
+}
+
+enum Synced {
+    Updated { tagged: bool },
+    Unchanged { tagged: bool },
+}
+
+fn sync_existing(
+    conn: &Connection,
+    mode: Mode,
+    disk: &DiskEntry,
+    db_entry: &FileEntry,
+) -> Result<Synced, String> {
+    if db_entry.size != disk.size || db_entry.modified != disk.modified {
+        if mode == Mode::Apply {
+            update_file_entry_metadata(conn, db_entry.id, disk.size, disk.modified.as_deref())
+                .map_err(|e| e.to_string())?;
+        }
+        return Ok(Synced::Updated {
+            tagged: backfill_tags(conn, mode, disk, db_entry.id)?,
+        });
+    }
+
+    if !is_media_entry(disk) {
+        return Ok(Synced::Unchanged { tagged: false });
+    }
+    let has_tags = get_media_tags(conn, db_entry.id)
+        .map(|t| t.is_some())
+        .unwrap_or(false);
+    Ok(Synced::Unchanged {
+        tagged: !has_tags && backfill_tags(conn, mode, disk, db_entry.id)?,
+    })
+}
+
+fn insert_new(
+    conn: &Connection,
+    catalog_id: i64,
+    mode: Mode,
+    disk: &DiskEntry,
+    parent_id: Option<i64>,
+    path_to_id: &mut HashMap<String, i64>,
+) -> Result<bool, String> {
+    if mode == Mode::Preview {
+        return Ok(is_media_entry(disk));
+    }
+
+    let entry_id = insert_file_entry(
+        conn,
+        catalog_id,
+        parent_id,
+        &disk.name,
+        &disk.rel_path,
+        disk.is_dir,
+        disk.size,
+        disk.modified.as_deref(),
+        disk.extension.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
+    path_to_id.insert(disk.rel_path.clone(), entry_id);
+    backfill_tags(conn, mode, disk, entry_id)
+}
+
 pub fn preview_update(
     conn: &Connection,
     catalog_id: i64,
@@ -152,77 +266,7 @@ pub fn preview_update_entries(
     catalog_id: i64,
     disk_entries: &[DiskEntry],
 ) -> Result<UpdatePreview, String> {
-    let db_entries = get_all_entries(conn, catalog_id).map_err(|e| e.to_string())?;
-    let mut db_map: HashMap<String, &FileEntry> = HashMap::new();
-    for entry in &db_entries {
-        db_map.insert(entry.path.clone(), entry);
-    }
-
-    guard_vanished_root(disk_entries, db_map.len())?;
-
-    let mut added: u64 = 0;
-    let mut updated: u64 = 0;
-    let mut unchanged: u64 = 0;
-    let mut tags_to_backfill: u64 = 0;
-    let mut seen_paths: HashSet<String> = HashSet::new();
-
-    let flipped: HashSet<String> = disk_entries
-        .iter()
-        .filter(|d| {
-            db_map
-                .get(&d.rel_path)
-                .is_some_and(|e| e.is_dir != d.is_dir)
-        })
-        .map(|d| d.rel_path.clone())
-        .collect();
-
-    for disk in disk_entries {
-        seen_paths.insert(disk.rel_path.clone());
-        match db_map.get(&disk.rel_path) {
-            Some(db_entry) if !flipped.contains(&disk.rel_path) => {
-                if db_entry.size != disk.size || db_entry.modified != disk.modified {
-                    updated += 1;
-                } else {
-                    if !disk.is_dir && is_media_file(disk.extension.as_deref()) {
-                        let has_tags = get_media_tags(conn, db_entry.id)
-                            .map(|t| t.is_some())
-                            .unwrap_or(false);
-                        if !has_tags {
-                            tags_to_backfill += 1;
-                        }
-                    }
-                    unchanged += 1;
-                }
-            }
-            _ => {
-                added += 1;
-                if !disk.is_dir && is_media_file(disk.extension.as_deref()) {
-                    tags_to_backfill += 1;
-                }
-            }
-        }
-    }
-
-    let mut deleted_files: u64 = 0;
-    let mut deleted_folders: u64 = 0;
-    for entry in &db_entries {
-        if !seen_paths.contains(&entry.path) || flipped.contains(&entry.path) {
-            if entry.is_dir {
-                deleted_folders += 1;
-            } else {
-                deleted_files += 1;
-            }
-        }
-    }
-
-    Ok(UpdatePreview {
-        added,
-        updated,
-        deleted_files,
-        deleted_folders,
-        unchanged,
-        tags_to_backfill,
-    })
+    reconcile(conn, catalog_id, disk_entries, Mode::Preview)
 }
 
 pub fn apply_update(
@@ -239,6 +283,15 @@ pub fn apply_update_entries(
     catalog_id: i64,
     disk_entries: &[DiskEntry],
 ) -> Result<UpdatePreview, String> {
+    reconcile(conn, catalog_id, disk_entries, Mode::Apply)
+}
+
+fn reconcile(
+    conn: &Connection,
+    catalog_id: i64,
+    disk_entries: &[DiskEntry],
+    mode: Mode,
+) -> Result<UpdatePreview, String> {
     let db_entries = get_all_entries(conn, catalog_id).map_err(|e| e.to_string())?;
     let mut db_map: HashMap<String, FileEntry> = HashMap::new();
     for entry in db_entries {
@@ -250,24 +303,15 @@ pub fn apply_update_entries(
     let mut added: u64 = 0;
     let mut updated: u64 = 0;
     let mut unchanged: u64 = 0;
-    let mut tags_backfilled: u64 = 0;
+    let mut tags_to_backfill: u64 = 0;
     let mut deleted_files: u64 = 0;
     let mut deleted_folders: u64 = 0;
     let mut seen_paths: HashSet<String> = HashSet::new();
 
-    let stale = collect_type_flipped(conn, catalog_id, &db_map, disk_entries)?;
-    if !stale.is_empty() {
-        delete_file_entries_by_ids(conn, catalog_id, &stale).map_err(|e| e.to_string())?;
-        let stale: HashSet<i64> = stale.into_iter().collect();
-        for entry in db_map.values().filter(|e| stale.contains(&e.id)) {
-            if entry.is_dir {
-                deleted_folders += 1;
-            } else {
-                deleted_files += 1;
-            }
-        }
-        db_map.retain(|_, e| !stale.contains(&e.id));
-    }
+    let (flipped_files, flipped_folders) =
+        drop_type_flipped(conn, catalog_id, &mut db_map, disk_entries, mode)?;
+    deleted_files += flipped_files;
+    deleted_folders += flipped_folders;
 
     let mut path_to_id: HashMap<String, i64> = HashMap::new();
     for (path, entry) in &db_map {
@@ -286,53 +330,23 @@ pub fn apply_update_entries(
         match db_map.get(&disk.rel_path) {
             Some(db_entry) => {
                 path_to_id.insert(disk.rel_path.clone(), db_entry.id);
-                if db_entry.size != disk.size || db_entry.modified != disk.modified {
-                    update_file_entry_metadata(
-                        conn,
-                        db_entry.id,
-                        disk.size,
-                        disk.modified.as_deref(),
-                    )
-                    .map_err(|e| e.to_string())?;
-                    if !disk.is_dir
-                        && is_media_file(disk.extension.as_deref())
-                        && extract_and_store_tags(conn, db_entry.id, &disk.full_path)?
-                    {
-                        tags_backfilled += 1;
+                let tagged = match sync_existing(conn, mode, disk, db_entry)? {
+                    Synced::Updated { tagged } => {
+                        updated += 1;
+                        tagged
                     }
-                    updated += 1;
-                } else {
-                    if !disk.is_dir && is_media_file(disk.extension.as_deref()) {
-                        let has_tags = get_media_tags(conn, db_entry.id)
-                            .map(|t| t.is_some())
-                            .unwrap_or(false);
-                        if !has_tags && extract_and_store_tags(conn, db_entry.id, &disk.full_path)?
-                        {
-                            tags_backfilled += 1;
-                        }
+                    Synced::Unchanged { tagged } => {
+                        unchanged += 1;
+                        tagged
                     }
-                    unchanged += 1;
+                };
+                if tagged {
+                    tags_to_backfill += 1;
                 }
             }
             None => {
-                let entry_id = insert_file_entry(
-                    conn,
-                    catalog_id,
-                    parent_id,
-                    &disk.name,
-                    &disk.rel_path,
-                    disk.is_dir,
-                    disk.size,
-                    disk.modified.as_deref(),
-                    disk.extension.as_deref(),
-                )
-                .map_err(|e| e.to_string())?;
-                path_to_id.insert(disk.rel_path.clone(), entry_id);
-                if !disk.is_dir
-                    && is_media_file(disk.extension.as_deref())
-                    && extract_and_store_tags(conn, entry_id, &disk.full_path)?
-                {
-                    tags_backfilled += 1;
+                if insert_new(conn, catalog_id, mode, disk, parent_id, &mut path_to_id)? {
+                    tags_to_backfill += 1;
                 }
                 added += 1;
             }
@@ -357,16 +371,18 @@ pub fn apply_update_entries(
     to_delete.sort_by_key(|e| path_depth(&e.path));
     let ids_to_delete: Vec<i64> = to_delete.iter().map(|e| e.id).collect();
 
-    if !ids_to_delete.is_empty() {
+    if mode == Mode::Apply && !ids_to_delete.is_empty() {
         delete_file_entries_by_ids(conn, catalog_id, &ids_to_delete).map_err(|e| e.to_string())?;
     }
 
     // Totals from the rows, not the disk-walk tally, so a mid-scan hiccup can't
     // desync catalogs.total_*.
-    recalc_catalog_stats(conn, catalog_id).map_err(|e| e.to_string())?;
+    if mode == Mode::Apply {
+        recalc_catalog_stats(conn, catalog_id).map_err(|e| e.to_string())?;
 
-    let scanned_at = Utc::now().to_rfc3339();
-    update_catalog_scanned_at(conn, catalog_id, &scanned_at).map_err(|e| e.to_string())?;
+        let scanned_at = Utc::now().to_rfc3339();
+        update_catalog_scanned_at(conn, catalog_id, &scanned_at).map_err(|e| e.to_string())?;
+    }
 
     Ok(UpdatePreview {
         added,
@@ -374,7 +390,7 @@ pub fn apply_update_entries(
         deleted_files,
         deleted_folders,
         unchanged,
-        tags_to_backfill: tags_backfilled,
+        tags_to_backfill,
     })
 }
 
@@ -735,5 +751,160 @@ mod tests {
         assert!(!entries[0].is_dir);
         assert_eq!(entries[0].size, 10);
         assert_eq!(get_catalog_by_id(&c, cat).unwrap().total_size, 10);
+    }
+
+    fn assert_same_counts(previewed: &UpdatePreview, applied: &UpdatePreview) {
+        assert_eq!(previewed.added, applied.added, "added");
+        assert_eq!(previewed.updated, applied.updated, "updated");
+        assert_eq!(
+            previewed.deleted_files, applied.deleted_files,
+            "deleted_files"
+        );
+        assert_eq!(
+            previewed.deleted_folders, applied.deleted_folders,
+            "deleted_folders"
+        );
+        assert_eq!(previewed.unchanged, applied.unchanged, "unchanged");
+    }
+
+    #[test]
+    fn preview_promises_exactly_what_apply_does() {
+        let tmp = TempDir::new("agree");
+        write(&tmp.path, "keep.txt", b"AAAA");
+        write(&tmp.path, "change.txt", b"AAAA");
+        write(&tmp.path, "sub/del.txt", b"X");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+
+        write(&tmp.path, "change.txt", b"AAAAAAAA");
+        std::fs::remove_file(tmp.path.join("sub/del.txt")).unwrap();
+        write(&tmp.path, "new.txt", b"NN");
+
+        let previewed = preview_update(&c, cat, &tmp.path).unwrap();
+        let applied = apply_update(&c, cat, &tmp.path).unwrap();
+
+        assert_same_counts(&previewed, &applied);
+        assert_eq!(previewed.tags_to_backfill, applied.tags_to_backfill);
+        assert_eq!(previewed.added, 1);
+        assert_eq!(previewed.deleted_files, 1);
+    }
+
+    #[test]
+    fn preview_promises_what_apply_does_when_a_directory_becomes_a_file() {
+        let tmp = TempDir::new("agreeflip");
+        write(&tmp.path, "Mixes/one.txt", b"a");
+        write(&tmp.path, "Mixes/two.txt", b"bb");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+
+        std::fs::remove_dir_all(tmp.path.join("Mixes")).unwrap();
+        write(&tmp.path, "Mixes", b"now a file");
+
+        let previewed = preview_update(&c, cat, &tmp.path).unwrap();
+        let applied = apply_update(&c, cat, &tmp.path).unwrap();
+
+        assert_same_counts(&previewed, &applied);
+        assert_eq!(previewed.deleted_folders, 1, "Mixes");
+        assert_eq!(previewed.deleted_files, 2, "one.txt + two.txt");
+        assert_eq!(previewed.added, 1, "Mixes, now a file");
+    }
+
+    #[test]
+    fn preview_counts_the_tag_work_a_changed_media_file_will_cost() {
+        let tmp = TempDir::new("mediapreview");
+        write(&tmp.path, "song.mp3", b"AAAA");
+
+        let c = conn();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        scan_directory(&c, cat, &tmp.path).unwrap();
+
+        write(&tmp.path, "song.mp3", b"AAAAAAAA");
+
+        let previewed = preview_update(&c, cat, &tmp.path).unwrap();
+        assert_eq!(previewed.updated, 1, "song.mp3 grew");
+        assert_eq!(
+            previewed.tags_to_backfill, 1,
+            "a changed media file has its tags re-read, so the preview must say so"
+        );
+    }
+
+    fn walked_paths(root: &Path) -> Vec<String> {
+        let mut paths: Vec<String> = walk_disk(root, WalkPolicy::Strict)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.rel_path)
+            .collect();
+        paths.sort();
+        paths
+    }
+
+    #[test]
+    fn walk_disk_reports_paths_relative_to_the_root() {
+        let tmp = TempDir::new("walkrel");
+        write(&tmp.path, "top.txt", b"T");
+        write(&tmp.path, "sub/deep/a.txt", b"A");
+
+        let paths = walked_paths(&tmp.path);
+        let got: Vec<&str> = paths.iter().map(String::as_str).collect();
+
+        assert_eq!(got, ["sub", "sub/deep", "sub/deep/a.txt", "top.txt"]);
+    }
+
+    #[test]
+    fn walk_disk_sizes_files_and_leaves_folders_at_zero() {
+        let tmp = TempDir::new("walksize");
+        write(&tmp.path, "sub/a.txt", b"12345");
+
+        let entries = walk_disk(&tmp.path, WalkPolicy::Strict).unwrap();
+        let dir = entries.iter().find(|e| e.rel_path == "sub").unwrap();
+        let file = entries.iter().find(|e| e.rel_path == "sub/a.txt").unwrap();
+
+        assert!(dir.is_dir);
+        assert_eq!(dir.size, 0, "folders stay sizeless");
+        assert_eq!(dir.extension, None);
+
+        assert!(!file.is_dir);
+        assert_eq!(file.size, 5);
+        assert_eq!(file.name, "a.txt");
+        assert_eq!(file.extension.as_deref(), Some("txt"));
+        assert!(file.modified.is_some());
+    }
+
+    #[test]
+    fn walk_disk_prunes_a_hidden_directorys_whole_subtree() {
+        let tmp = TempDir::new("walkhidden");
+        write(&tmp.path, "keep.txt", b"K");
+        write(&tmp.path, ".git/config", b"C");
+        write(&tmp.path, "Thumbs.db", b"junk");
+
+        let paths = walked_paths(&tmp.path);
+        let got: Vec<&str> = paths.iter().map(String::as_str).collect();
+
+        assert_eq!(got, ["keep.txt"], "a skipped folder takes its children too");
+    }
+
+    #[test]
+    fn walk_disk_does_not_descend_into_a_symlinked_directory() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new("walklink");
+        write(&tmp.path, "real/inner.txt", b"I");
+        symlink(tmp.path.join("real"), tmp.path.join("link")).unwrap();
+
+        let paths = walked_paths(&tmp.path);
+
+        assert!(paths.iter().any(|p| p == "real/inner.txt"));
+        assert!(
+            paths.iter().any(|p| p == "link"),
+            "the link itself is listed"
+        );
+        assert!(
+            !paths.iter().any(|p| p.starts_with("link/")),
+            "descending a symlink is how a scan ends up walking in circles"
+        );
     }
 }

@@ -108,7 +108,10 @@ pub fn extract_and_store_tags(
 
 #[cfg(test)]
 mod tests {
-    use super::is_media_file;
+    use super::{extract_and_store_tags, is_media_file};
+    use crate::db::{get_media_tags, insert_catalog, insert_file_entry, run_migrations};
+    use rusqlite::Connection;
+    use std::path::PathBuf;
 
     #[test]
     fn recognizes_media_extensions() {
@@ -125,5 +128,108 @@ mod tests {
         assert!(!is_media_file(Some("txt")));
         assert!(!is_media_file(Some("")));
         assert!(!is_media_file(None));
+    }
+
+    struct TempFile {
+        path: PathBuf,
+    }
+
+    impl TempFile {
+        fn new(name: &str, bytes: &[u8]) -> Self {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "kathaloq-media-{}-{nanos}-{name}",
+                std::process::id()
+            ));
+            std::fs::write(&path, bytes).unwrap();
+            TempFile { path }
+        }
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    fn wav_bytes(frames: u32) -> Vec<u8> {
+        let channels: u16 = 2;
+        let sample_rate: u32 = 44100;
+        let bits: u16 = 16;
+        let block_align: u16 = channels * bits / 8;
+        let byte_rate: u32 = sample_rate * u32::from(block_align);
+        let data_len: u32 = frames * u32::from(block_align);
+
+        let mut b = Vec::new();
+        b.extend_from_slice(b"RIFF");
+        b.extend_from_slice(&(36 + data_len).to_le_bytes());
+        b.extend_from_slice(b"WAVE");
+        b.extend_from_slice(b"fmt ");
+        b.extend_from_slice(&16u32.to_le_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&channels.to_le_bytes());
+        b.extend_from_slice(&sample_rate.to_le_bytes());
+        b.extend_from_slice(&byte_rate.to_le_bytes());
+        b.extend_from_slice(&block_align.to_le_bytes());
+        b.extend_from_slice(&bits.to_le_bytes());
+        b.extend_from_slice(b"data");
+        b.extend_from_slice(&data_len.to_le_bytes());
+        b.resize(b.len() + data_len as usize, 0);
+        b
+    }
+
+    fn db_with_file(ext: &str) -> (Connection, i64) {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_migrations(&c).unwrap();
+        let cat = insert_catalog(&c, "t", "/r", "2026-01-01T00:00:00Z").unwrap();
+        let name = format!("song.{ext}");
+        let id = insert_file_entry(&c, cat, None, &name, &name, false, 1, None, Some(ext)).unwrap();
+        (c, id)
+    }
+
+    #[test]
+    fn a_readable_wav_stores_its_audio_properties() {
+        let file = TempFile::new("song.wav", &wav_bytes(4410));
+        let (c, id) = db_with_file("wav");
+
+        let stored = extract_and_store_tags(&c, id, &file.path).unwrap();
+        assert!(stored, "a parseable file reports that it stored tags");
+
+        let tags = get_media_tags(&c, id).unwrap().expect("a row was written");
+        assert_eq!(tags.sample_rate, Some(44100));
+        assert_eq!(tags.channels, Some(2));
+        let secs = tags.duration_secs.expect("duration was read");
+        assert!((secs - 0.1).abs() < 0.01, "0.1s of frames, got {secs}");
+    }
+
+    #[test]
+    fn an_unparseable_media_file_is_marked_so_the_next_scan_skips_it() {
+        let file = TempFile::new("broken.mp3", &vec![0xAAu8; 4096]);
+        let (c, id) = db_with_file("mp3");
+
+        let stored = extract_and_store_tags(&c, id, &file.path).unwrap();
+        assert!(!stored, "nothing was actually read off the file");
+
+        assert!(
+            get_media_tags(&c, id).unwrap().is_some(),
+            "an empty row must stand in, or every later scan re-reads the same broken file"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_file_stays_retryable() {
+        let (c, id) = db_with_file("mp3");
+        let missing = std::env::temp_dir().join("kathaloq-media-does-not-exist.mp3");
+
+        let stored = extract_and_store_tags(&c, id, &missing).unwrap();
+        assert!(!stored);
+        assert!(
+            get_media_tags(&c, id).unwrap().is_none(),
+            "a file that was merely unreachable must not be written off"
+        );
     }
 }
