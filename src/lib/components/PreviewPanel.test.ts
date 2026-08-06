@@ -15,13 +15,25 @@ import { fileURLToPath } from "node:url";
 // webview's flush ordering, so it passed even with the bug present — useless as
 // a guard. This source check is deterministic.
 
-const FILES = ["./PreviewPanel.svelte", "./InfoModal.svelte"];
+const PREVIEW_SVELTE = "./PreviewPanel.svelte";
+const FILES = [PREVIEW_SVELTE, "./InfoModal.svelte"];
 
 // Matches a raw `tags.` or `stats.` deref. `tags?.`/`stats?.` won't match (the
 // `?` sits between the name and the dot). The `@const tags = mediaTags` lines
 // have no dot after the alias, and `bulkMediaTags.`/`bulkStats.` use capital
 // letters, so the word-boundary lowercase pattern skips them.
 const RAW_DEREF = /\b(?:tags|stats)\.[a-z]/g;
+
+describe("preview detail-load retry guard", () => {
+  it("PreviewPanel never clears its load memo on failure", () => {
+    const src = readFileSync(fileURLToPath(new URL(PREVIEW_SVELTE, import.meta.url)), "utf8");
+    const resets = src.match(/^\s*lastLoadKey\s*=\s*""/gm) ?? [];
+    expect(
+      resets,
+      "clearing lastLoadKey in the catch re-arms afterUpdate, so a failing load reruns forever"
+    ).toEqual([]);
+  });
+});
 
 describe("preview/info null-safety", () => {
   for (const rel of FILES) {

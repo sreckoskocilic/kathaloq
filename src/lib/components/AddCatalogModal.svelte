@@ -1,5 +1,6 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
+  import { notifyError } from "../stores/notify";
 
   export let onSubmit: (path: string, name: string) => void;
   export let onClose: () => void;
@@ -9,19 +10,24 @@
   let nameIsAuto = true;
 
   async function pickFolder() {
-    const selected = await open({ directory: true, multiple: false });
-    if (selected) {
-      path = selected as string;
-      if (nameIsAuto) {
-        const parts = path.split(/[/\\]/);
-        name = parts[parts.length - 1] || "Untitled";
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (selected) {
+        path = selected as string;
+        if (nameIsAuto) {
+          const parts = path.split(/[/\\]/);
+          name = parts[parts.length - 1] || "Untitled";
+        }
       }
+    } catch (e) {
+      notifyError("Failed to open the folder picker", e);
     }
   }
 
   function handleSubmit() {
-    if (path && name) {
-      onSubmit(path, name);
+    const trimmed = name.trim();
+    if (path && trimmed) {
+      onSubmit(path, trimmed);
     }
   }
 
@@ -82,7 +88,7 @@
 
     <div class="actions">
       <button class="btn-cancel" on:click={onClose}>Cancel</button>
-      <button class="btn-submit" on:click={handleSubmit} disabled={!path || !name}>
+      <button class="btn-submit" on:click={handleSubmit} disabled={!path || !name.trim()}>
         Start Scan
       </button>
     </div>

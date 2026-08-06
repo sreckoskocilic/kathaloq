@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { getChildren } from "../services/tauri";
   import { catalogVersion } from "../stores/catalog";
+  import { notifyError } from "../stores/notify";
   import type { FileEntry } from "../types";
 
   import type { BreadcrumbItem } from "../types";
@@ -28,16 +29,22 @@
     })
   );
 
-  async function fetchChildren() {
-    children = (await getChildren(entry.catalog_id, entry.id))
-      .filter((e) => e.is_dir)
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-    loaded = true;
+  async function fetchChildren(): Promise<boolean> {
+    try {
+      children = (await getChildren(entry.catalog_id, entry.id))
+        .filter((e) => e.is_dir)
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      loaded = true;
+      return true;
+    } catch (e) {
+      notifyError("Failed to open folder", e);
+      return false;
+    }
   }
 
   async function toggle() {
     if (!entry.is_dir) return;
-    if (!loaded) await fetchChildren();
+    if (!loaded && !(await fetchChildren())) return;
     expanded = !expanded;
   }
 

@@ -150,9 +150,16 @@
       expandedCatalogs = expandedCatalogs;
     } else {
       if (!rootFolders.has(catalog.id)) {
-        const children = sortByName((await getChildren(catalog.id, null)).filter((f) => f.is_dir));
-        rootFolders.set(catalog.id, children);
-        rootFolders = rootFolders;
+        try {
+          const children = sortByName(
+            (await getChildren(catalog.id, null)).filter((f) => f.is_dir)
+          );
+          rootFolders.set(catalog.id, children);
+          rootFolders = rootFolders;
+        } catch (err) {
+          notifyError("Failed to expand catalog", err);
+          return;
+        }
       }
       expandedCatalogs.add(catalog.id);
       expandedCatalogs = expandedCatalogs;

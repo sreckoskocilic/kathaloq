@@ -68,7 +68,6 @@
         folderStats = result;
       }
     } catch (e) {
-      lastLoadKey = "";
       notifyError("Failed to load details", e);
     }
 

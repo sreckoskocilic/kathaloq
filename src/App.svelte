@@ -126,7 +126,8 @@
         $searchTruncated = false;
       }
     } catch (e) {
-      if (thisRequest === requestId) $currentFiles = [];
+      if (thisRequest !== requestId) return;
+      $currentFiles = [];
       notifyError("Failed to load files", e);
     }
   }
@@ -140,10 +141,9 @@
         $searchTruncated = result.truncated;
       }
     } catch (e) {
-      if (thisRequest === requestId) {
-        $currentFiles = [];
-        $searchTruncated = false;
-      }
+      if (thisRequest !== requestId) return;
+      $currentFiles = [];
+      $searchTruncated = false;
       notifyError("Search failed", e);
     }
   }

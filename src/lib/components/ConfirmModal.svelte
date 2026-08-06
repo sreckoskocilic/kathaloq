@@ -5,7 +5,6 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") onCancel();
-    if (e.key === "Enter") onConfirm();
   }
 </script>
 

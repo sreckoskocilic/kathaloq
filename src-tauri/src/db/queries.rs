@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, params};
 use unicode_normalization::UnicodeNormalization;
@@ -20,6 +20,19 @@ const MAX_TREE_DEPTH: u32 = 100;
 const MAX_SQL_PARAMS: usize = 30_000;
 
 const SEARCH_LIMIT: i64 = 500;
+
+fn id_json(ids: &[i64]) -> String {
+    let mut out = String::with_capacity(ids.len() * 8 + 2);
+    out.push('[');
+    for (i, id) in ids.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&id.to_string());
+    }
+    out.push(']');
+    out
+}
 
 pub fn insert_catalog(
     conn: &Connection,
@@ -335,47 +348,35 @@ pub fn get_bulk_stats(
             total_size: 0,
         });
     }
-    let placeholders: String = (0..ids.len())
-        .map(|i| format!("?{}", i + 1))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let cat_param = ids.len() + 1;
-    let depth_param = ids.len() + 2;
-    let sql = format!(
-        "WITH RECURSIVE
+    let sql = "WITH RECURSIVE
            seeds(id, is_dir) AS (
-             SELECT id, is_dir FROM file_entries WHERE id IN ({placeholders}) AND catalog_id = ?{cat_param}
+             SELECT fe.id, fe.is_dir FROM file_entries fe
+               JOIN json_each(?1) j ON fe.id = j.value
+               WHERE fe.catalog_id = ?2
            ),
            covered(id, depth) AS (
              SELECT id, 0 FROM (
-               -- selected files count themselves; selected folders start at their children
                SELECT id FROM seeds WHERE is_dir = 0
                UNION
                SELECT fe.id FROM file_entries fe JOIN seeds s ON fe.parent_id = s.id
-                 WHERE s.is_dir = 1 AND fe.catalog_id = ?{cat_param}
+                 WHERE s.is_dir = 1 AND fe.catalog_id = ?2
              )
              UNION
              SELECT fe.id, c.depth + 1 FROM file_entries fe JOIN covered c ON fe.parent_id = c.id
-               WHERE fe.catalog_id = ?{cat_param} AND c.depth < ?{depth_param}
+               WHERE fe.catalog_id = ?2 AND c.depth < ?3
            )
          SELECT
             COALESCE(SUM(CASE WHEN fe.is_dir = 0 THEN 1 ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN fe.is_dir = 1 THEN 1 ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN fe.is_dir = 0 THEN fe.size ELSE 0 END), 0)
          FROM file_entries fe
-         WHERE fe.id IN (SELECT id FROM covered)"
-    );
+         WHERE fe.id IN (SELECT id FROM covered)";
 
-    let depth = MAX_TREE_DEPTH;
-    let mut params: Vec<&dyn rusqlite::ToSql> =
-        ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
-    params.push(&catalog_id);
-    params.push(&depth);
-
-    let (file_count, folder_count, total_size): (u64, u64, u64) =
-        conn.query_row(&sql, params.as_slice(), |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?;
+    let (file_count, folder_count, total_size): (u64, u64, u64) = conn.query_row(
+        sql,
+        params![id_json(ids), catalog_id, MAX_TREE_DEPTH],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
 
     Ok(FolderStats {
         file_count,
@@ -445,21 +446,11 @@ pub fn get_media_tags_bulk(
     if file_entry_ids.is_empty() {
         return Ok(Vec::new());
     }
-    // One IN(...) query, not one per id.
-    let placeholders: String = (0..file_entry_ids.len())
-        .map(|i| format!("?{}", i + 1))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
+    let mut stmt = conn.prepare(
         "SELECT id, file_entry_id, duration_secs, bitrate, sample_rate, channels, title, artist, album, genre, year, track_number
-         FROM media_tags WHERE file_entry_id IN ({placeholders})"
-    );
-    let params: Vec<&dyn rusqlite::ToSql> = file_entry_ids
-        .iter()
-        .map(|id| id as &dyn rusqlite::ToSql)
-        .collect();
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params.as_slice(), |row| {
+         FROM media_tags WHERE file_entry_id IN (SELECT value FROM json_each(?1))",
+    )?;
+    let rows = stmt.query_map(params![id_json(file_entry_ids)], |row| {
         Ok(MediaTags {
             id: row.get(0)?,
             file_entry_id: row.get(1)?,
@@ -475,6 +466,16 @@ pub fn get_media_tags_bulk(
             track_number: row.get(11)?,
         })
     })?;
+    rows.collect()
+}
+
+pub fn media_tagged_ids(conn: &Connection, catalog_id: i64) -> rusqlite::Result<HashSet<i64>> {
+    let mut stmt = conn.prepare(
+        "SELECT mt.file_entry_id FROM media_tags mt
+         JOIN file_entries fe ON fe.id = mt.file_entry_id
+         WHERE fe.catalog_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![catalog_id], |row| row.get(0))?;
     rows.collect()
 }
 
@@ -994,6 +995,49 @@ mod tests {
         let stats = get_bulk_stats(&c, cat, &[a, f1]).unwrap();
         assert_eq!(stats.file_count, 1);
         assert_eq!(stats.total_size, 100);
+    }
+
+    #[test]
+    fn bulk_queries_accept_more_ids_than_the_sqlite_variable_limit() {
+        let c = conn();
+        let cat = catalog(&c);
+        let a = dir(&c, cat, None, "a");
+        let f = file(&c, cat, Some(a), "a/f.txt", 100, "txt");
+        insert_media_tags(
+            &c,
+            f,
+            Some(1.0),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let mut ids: Vec<i64> = (10_000..60_000).collect();
+        ids.push(a);
+        ids.push(f);
+        assert!(
+            ids.len() > 32_766,
+            "fixture must exceed SQLITE_MAX_VARIABLE_NUMBER, else it proves nothing"
+        );
+
+        let stats =
+            get_bulk_stats(&c, cat, &ids).expect("a select-all must not blow the bind limit");
+        assert_eq!(stats.file_count, 1);
+        assert_eq!(stats.total_size, 100);
+
+        assert_eq!(
+            get_media_tags_bulk(&c, &ids)
+                .expect("a select-all must not blow the bind limit")
+                .len(),
+            1
+        );
     }
 
     #[test]

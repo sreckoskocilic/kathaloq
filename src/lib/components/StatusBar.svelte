@@ -14,7 +14,7 @@
 
   // Mirrors PreviewPanel: a folder counts its recursive contents (getBulkStats),
   // not its 0-byte row. catalogVersion busts the memo after a mutation.
-  let selectionSize = 0;
+  let selectionSize: number | null = 0;
   let lastKey = "";
   let sizeGen = 0;
 
@@ -42,6 +42,7 @@
       );
       if (gen === sizeGen) selectionSize = stats.total_size;
     } catch (e) {
+      if (gen === sizeGen) selectionSize = null;
       notifyError("Failed to size selection", e);
     }
   }

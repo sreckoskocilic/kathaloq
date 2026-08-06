@@ -12,6 +12,16 @@ fn is_corruption(error: &rusqlite::Error) -> bool {
     )
 }
 
+fn quarantine_sidecars(db_path: &std::path::Path, quarantine: &std::path::Path) {
+    for suffix in ["-wal", "-shm"] {
+        let mut from = db_path.as_os_str().to_os_string();
+        from.push(suffix);
+        let mut to = quarantine.as_os_str().to_os_string();
+        to.push(suffix);
+        let _ = std::fs::rename(PathBuf::from(from), PathBuf::from(to));
+    }
+}
+
 #[derive(Clone)]
 pub struct Database {
     write_conn: Arc<Mutex<Connection>>,
@@ -38,6 +48,7 @@ impl Database {
                         db_path.display()
                     )
                 })?;
+                quarantine_sidecars(&db_path, &quarantine);
                 Self::open_at(&db_path).map_err(|e| {
                     format!(
                         "Could not recreate the database after quarantining {}: {e}",

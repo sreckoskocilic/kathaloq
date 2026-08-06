@@ -8,8 +8,8 @@ use walkdir::WalkDir;
 use std::collections::HashSet;
 
 use crate::db::{
-    collect_descendant_ids, delete_file_entries_by_ids, get_all_entries, get_media_tags,
-    insert_file_entry, recalc_catalog_stats, update_catalog_scanned_at, update_file_entry_metadata,
+    collect_descendant_ids, delete_file_entries_by_ids, get_all_entries, insert_file_entry,
+    media_tagged_ids, recalc_catalog_stats, update_catalog_scanned_at, update_file_entry_metadata,
 };
 use crate::models::{FileEntry, UpdatePreview};
 use crate::scanner::media::{extract_and_store_tags, is_media_file};
@@ -202,6 +202,7 @@ fn sync_existing(
     mode: Mode,
     disk: &DiskEntry,
     db_entry: &FileEntry,
+    tagged_ids: &HashSet<i64>,
 ) -> Result<Synced, String> {
     if db_entry.size != disk.size || db_entry.modified != disk.modified {
         if mode == Mode::Apply {
@@ -216,9 +217,7 @@ fn sync_existing(
     if !is_media_entry(disk) {
         return Ok(Synced::Unchanged { tagged: false });
     }
-    let has_tags = get_media_tags(conn, db_entry.id)
-        .map(|t| t.is_some())
-        .unwrap_or(false);
+    let has_tags = tagged_ids.contains(&db_entry.id);
     Ok(Synced::Unchanged {
         tagged: !has_tags && backfill_tags(conn, mode, disk, db_entry.id)?,
     })
@@ -318,6 +317,8 @@ fn reconcile(
         path_to_id.insert(path.clone(), entry.id);
     }
 
+    let tagged_ids = media_tagged_ids(conn, catalog_id).map_err(|e| e.to_string())?;
+
     for disk in disk_entries {
         seen_paths.insert(disk.rel_path.clone());
 
@@ -330,7 +331,7 @@ fn reconcile(
         match db_map.get(&disk.rel_path) {
             Some(db_entry) => {
                 path_to_id.insert(disk.rel_path.clone(), db_entry.id);
-                let tagged = match sync_existing(conn, mode, disk, db_entry)? {
+                let tagged = match sync_existing(conn, mode, disk, db_entry, &tagged_ids)? {
                     Synced::Updated { tagged } => {
                         updated += 1;
                         tagged

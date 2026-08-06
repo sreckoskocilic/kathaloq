@@ -109,6 +109,7 @@
     if (!selectedIds.has(entry.id)) {
       selectedIds = new SvelteSet([entry.id]);
       lastClickedIndex = index;
+      notifySelection();
     }
     contextMenu = { x: e.clientX, y: e.clientY };
   }
@@ -151,6 +152,7 @@
     if (target.closest(".row")) return;
     selectedIds = new SvelteSet();
     lastClickedIndex = null;
+    notifySelection();
   }
 
   function getCellValue(entry: FileEntry, colId: string): string {

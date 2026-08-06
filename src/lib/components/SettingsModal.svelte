@@ -16,16 +16,18 @@
   let showLicenses = false;
   let licensesHtml = "";
   let licensesLoading = false;
+  let licensesFailed = false;
 
   async function openLicenses() {
     showLicenses = true;
     if (licensesHtml) return;
     licensesLoading = true;
+    licensesFailed = false;
     try {
       licensesHtml = await getThirdPartyLicenses();
     } catch (e) {
       notifyError("Failed to load licenses", e);
-      licensesHtml = "<p>Failed to load licenses.</p>";
+      licensesFailed = true;
     }
     licensesLoading = false;
   }
@@ -139,6 +141,8 @@
       </div>
       {#if licensesLoading}
         <p class="lic-status">Loading…</p>
+      {:else if licensesFailed}
+        <p class="lic-status">Failed to load licenses. Close and try again.</p>
       {:else}
         <iframe class="lic-frame" title="Third party licenses" sandbox="" srcdoc={licensesHtml}
         ></iframe>
