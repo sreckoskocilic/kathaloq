@@ -34,6 +34,10 @@ fn id_json(ids: &[i64]) -> String {
     out
 }
 
+fn u64_at(row: &rusqlite::Row, idx: usize) -> rusqlite::Result<u64> {
+    Ok(row.get::<_, i64>(idx)? as u64)
+}
+
 pub fn insert_catalog(
     conn: &Connection,
     name: &str,
@@ -55,7 +59,7 @@ pub fn update_catalog_stats(
 ) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE catalogs SET total_files = ?1, total_size = ?2 WHERE id = ?3",
-        params![total_files, total_size, id],
+        params![total_files as i64, total_size as i64, id],
     )?;
     Ok(())
 }
@@ -70,8 +74,8 @@ pub fn list_catalogs(conn: &Connection) -> rusqlite::Result<Vec<Catalog>> {
             name: row.get(1)?,
             root_path: row.get(2)?,
             scanned_at: row.get(3)?,
-            total_files: row.get(4)?,
-            total_size: row.get(5)?,
+            total_files: u64_at(row, 4)?,
+            total_size: u64_at(row, 5)?,
         })
     })?;
     rows.collect()
@@ -99,7 +103,7 @@ pub fn insert_file_entry(
         "INSERT INTO file_entries (catalog_id, parent_id, name, name_lower, path, is_dir, size, modified, extension)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )?
-    .execute(params![catalog_id, parent_id, name, search_key(name), path, is_dir as i32, size, modified, extension])?;
+    .execute(params![catalog_id, parent_id, name, search_key(name), path, is_dir as i32, size as i64, modified, extension])?;
     Ok(conn.last_insert_rowid())
 }
 
@@ -258,7 +262,7 @@ pub fn recalc_catalog_stats(conn: &Connection, catalog_id: i64) -> rusqlite::Res
     let (total_files, total_size): (u64, u64) = conn.query_row(
         "SELECT COALESCE(COUNT(*), 0), COALESCE(SUM(size), 0) FROM file_entries WHERE catalog_id = ?1 AND is_dir = 0",
         params![catalog_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((u64_at(row, 0)?, u64_at(row, 1)?)),
     )?;
     update_catalog_stats(conn, catalog_id, total_files, total_size)
 }
@@ -270,7 +274,7 @@ pub fn update_file_entry_metadata(
     modified: Option<&str>,
 ) -> rusqlite::Result<()> {
     conn.prepare_cached("UPDATE file_entries SET size = ?1, modified = ?2 WHERE id = ?3")?
-        .execute(params![size, modified, id])?;
+        .execute(params![size as i64, modified, id])?;
     Ok(())
 }
 
@@ -296,8 +300,8 @@ pub fn get_catalog_by_id(conn: &Connection, id: i64) -> rusqlite::Result<Catalog
                 name: row.get(1)?,
                 root_path: row.get(2)?,
                 scanned_at: row.get(3)?,
-                total_files: row.get(4)?,
-                total_size: row.get(5)?,
+                total_files: u64_at(row, 4)?,
+                total_size: u64_at(row, 5)?,
             })
         },
     )
@@ -324,7 +328,7 @@ pub fn get_folder_stats(
          FROM file_entries fe
          WHERE fe.id IN (SELECT id FROM descendants WHERE id != ?1)",
         params![folder_id, catalog_id, MAX_TREE_DEPTH],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        |row| Ok((u64_at(row, 0)?, u64_at(row, 1)?, u64_at(row, 2)?)),
     )?;
 
     Ok(FolderStats {
@@ -375,7 +379,7 @@ pub fn get_bulk_stats(
     let (file_count, folder_count, total_size): (u64, u64, u64) = conn.query_row(
         sql,
         params![id_json(ids), catalog_id, MAX_TREE_DEPTH],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        |row| Ok((u64_at(row, 0)?, u64_at(row, 1)?, u64_at(row, 2)?)),
     )?;
 
     Ok(FolderStats {
@@ -548,7 +552,7 @@ fn map_file_entry(row: &rusqlite::Row) -> rusqlite::Result<FileEntry> {
         name: row.get(3)?,
         path: row.get(4)?,
         is_dir: row.get::<_, i32>(5)? != 0,
-        size: row.get(6)?,
+        size: u64_at(row, 6)?,
         modified: row.get(7)?,
         extension: row.get(8)?,
     })
