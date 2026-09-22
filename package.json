@@ -1,7 +1,7 @@
 {
   "name": "kathaloq",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,7 +17,8 @@
     "serve": "tauri dev",
     "test": "vitest run",
     "test:watch": "vitest",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "bump": "node scripts/bump.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
