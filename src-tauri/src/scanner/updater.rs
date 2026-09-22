@@ -20,6 +20,7 @@ pub struct DiskEntry {
     pub rel_path: String,
     pub full_path: std::path::PathBuf,
     pub is_dir: bool,
+    pub is_file: bool,
     pub size: u64,
     pub modified: Option<String>,
     pub extension: Option<String>,
@@ -76,6 +77,7 @@ pub fn walk_disk(root: &Path, policy: WalkPolicy) -> Result<Vec<DiskEntry>, Stri
             .to_string_lossy()
             .to_string();
         let is_dir = metadata.is_dir();
+        let is_file = metadata.file_type().is_file();
         let size = if is_dir { 0 } else { metadata.len() };
 
         let modified = metadata.modified().ok().map(|t| {
@@ -94,6 +96,7 @@ pub fn walk_disk(root: &Path, policy: WalkPolicy) -> Result<Vec<DiskEntry>, Stri
             rel_path,
             full_path: path.to_path_buf(),
             is_dir,
+            is_file,
             size,
             modified,
             extension,
@@ -144,8 +147,8 @@ enum Mode {
     Apply,
 }
 
-fn is_media_entry(disk: &DiskEntry) -> bool {
-    !disk.is_dir && is_media_file(disk.extension.as_deref())
+pub(crate) fn is_media_entry(disk: &DiskEntry) -> bool {
+    disk.is_file && is_media_file(disk.extension.as_deref())
 }
 
 fn backfill_tags(

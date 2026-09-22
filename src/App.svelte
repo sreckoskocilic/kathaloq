@@ -196,6 +196,9 @@
     removeTargets = [];
     try {
       await api.removeFileEntries(catalogId, ids);
+      const removed = new Set(ids);
+      const cut = $breadcrumbs.findIndex((b) => b.id !== null && removed.has(b.id));
+      if (cut >= 0) $breadcrumbs = $breadcrumbs.slice(0, cut);
       await loadCatalogs();
       bumpCatalogVersion();
       await refreshCurrentView(catalogId);
@@ -269,12 +272,13 @@
   <UpdateCatalogModal
     catalog={updateTarget}
     onComplete={async () => {
+      const updatedId = updateTarget?.id;
       updateTarget = null;
-      $breadcrumbs = [];
       await loadCatalogs();
       bumpCatalogVersion();
-      if ($activeCatalogId !== null) {
-        await refreshCurrentView($activeCatalogId);
+      if (updatedId !== undefined && updatedId === $activeCatalogId) {
+        $breadcrumbs = [];
+        await refreshCurrentView(updatedId);
       }
     }}
     onClose={() => (updateTarget = null)}

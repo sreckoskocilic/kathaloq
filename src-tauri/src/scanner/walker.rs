@@ -4,8 +4,8 @@ use std::path::Path;
 use rusqlite::Connection;
 
 use crate::db::{insert_file_entry, update_catalog_stats};
-use crate::scanner::media::{extract_and_store_tags, is_media_file};
-use crate::scanner::updater::{DiskEntry, WalkPolicy, walk_disk};
+use crate::scanner::media::extract_and_store_tags;
+use crate::scanner::updater::{DiskEntry, WalkPolicy, is_media_entry, walk_disk};
 
 pub fn scan_directory(conn: &Connection, catalog_id: i64, root: &Path) -> Result<(), String> {
     let entries = walk_disk(root, WalkPolicy::SkipUnreadable)?;
@@ -47,7 +47,7 @@ pub fn index_entries(
             total_files += 1;
             total_size += entry.size;
 
-            if is_media_file(entry.extension.as_deref()) {
+            if is_media_entry(entry) {
                 extract_and_store_tags(conn, entry_id, &entry.full_path)?;
             }
         }
